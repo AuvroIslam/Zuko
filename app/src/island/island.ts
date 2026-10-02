@@ -489,7 +489,6 @@ export class Island {
   freezeFx(at: number) {
     this.engine.freezeFx(at);
     this.ensureRunning();
-    document.title = `DBG fx=${this.engine.fxActive} on=${this.botOnScreen} clock=${this.engine.clock} mode=${State.mode} view=${State.view} last=${this.lastBlockFire}`;
   }
 
   // ── File drop ───────────────────────────────────────────────────────────────
