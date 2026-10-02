@@ -2,14 +2,13 @@
 //
 // While the sequence engine is active this canvas draws the whole island body:
 // card, dashed drop frame, drop text, progress bar, the choose card, Zuko and
-// the file being sucked in. The island's own Zuko is hidden for the duration,
-// exactly as on macOS, because this canvas draws its own.
+// the dropped file. Zuko scans the file: a beam from its visor sweeps the page
+// top to bottom, then a shield-check badge pops on it. The island's own Zuko is
+// hidden for the duration because this canvas poses its own BotEngine.
 
 import { State } from "../core/state";
-import {
-  USC, eIn, eInOut, eOut, lerp, progressAt,
-  type UploadEyeShape, type UploadFrame,
-} from "./sequence";
+import { BotEngine, LED, shieldPath, type EyeShape, type RGB } from "../character/engine";
+import { USC, lerp, progressAt, seg, type UploadEyeShape, type UploadFrame } from "./sequence";
 
 const FONT = 'system-ui, "Segoe UI Variable Text", "Segoe UI", sans-serif';
 
@@ -20,25 +19,25 @@ function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: n
   ctx.roundRect(x, y, w, h, rad);
 }
 
-/** Superellipse body — port of usBodyPath(m, R). */
-function bodyPath(ctx: CanvasRenderingContext2D, m: number, R: number): { rx: number; ry: number } {
-  const mc = Math.max(0, Math.min(m, 1));
-  const n = 2.15 + (5.5 - 2.15) * mc;
-  const rx = R * (1.04 - 0.04 * mc);
-  const ry = R * (0.97 - 0.03 * mc);
-  ctx.beginPath();
-  for (let i = 0; i <= 96; i++) {
-    const a = (i / 96) * Math.PI * 2;
-    const ca = Math.cos(a);
-    const sa = Math.sin(a);
-    const px = rx * Math.sign(ca) * Math.pow(Math.abs(ca), 2 / n);
-    const py = ry * Math.sign(sa) * Math.pow(Math.abs(sa), 2 / n);
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-  return { rx, ry };
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const mix3 = (a: RGB, b: RGB, t: number): RGB => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+const rgba = (c: RGB, a: number) =>
+  `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${clamp01(a)})`;
+const WHITE: RGB = [1, 1, 1];
+
+/** A bump: 0 → 1 → 0 over [a, a + d]. */
+const pulse = (t: number, a: number, d: number) => (t > a && t < a + d ? Math.sin((Math.PI * (t - a)) / d) : 0);
+
+function blinkAt(t: number, tb: number): number {
+  const k = seg(t, tb, tb + 0.12);
+  return k > 0 && k < 1 ? 1 - Math.sin(Math.PI * k) * 0.94 : 1;
 }
+
+const EYE: Record<UploadEyeShape, EyeShape> = { pill: "pill", cup: "cup", content: "happy", wide: "wide" };
+
+/** Document size at scale 1, in island points. */
+const DOC_W = 34;
+const DOC_H = 42;
 
 function text(
   ctx: CanvasRenderingContext2D,
@@ -72,6 +71,7 @@ export class UploadCanvas {
   private ctx: CanvasRenderingContext2D | null;
   private overlay: HTMLElement;
   private sizedFor = 0;
+  private bot = new BotEngine();
 
   constructor(actions: UploadCanvasActions) {
     this.canvas = document.createElement("canvas");
@@ -98,9 +98,11 @@ export class UploadCanvas {
     this.el.append(this.canvas, this.overlay);
 
     this.ctx = this.canvas.getContext("2d");
+    this.bot.flickerSeed = 7.3;
+    this.bot.snapToState();
   }
 
-  /** `wallTime` in seconds drives the marching dashes, like the macOS timeline. */
+  /** `wallTime` in seconds drives the marching dashes and the flame flicker. */
   draw(f: UploadFrame, wallTime: number) {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     if (this.sizedFor !== dpr) {
@@ -152,7 +154,7 @@ export class UploadCanvas {
     if (f.zoneAlpha > 0) {
       ctx.save();
       ctx.globalAlpha = f.zoneAlpha;
-      ctx.strokeStyle = f.zoneOver ? "rgba(52,212,153,0.55)" : "rgba(255,255,255,0.14)";
+      ctx.strokeStyle = f.zoneOver ? "rgba(46,230,197,0.5)" : "rgba(255,255,255,0.14)";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 5]);
       ctx.lineDashOffset = -wallTime * 20;
@@ -165,8 +167,9 @@ export class UploadCanvas {
     if (f.barAlpha > 0 || f.barReveal > 0) this.drawProgressBar(ctx, f);
     if (f.chooseAlpha > 0) this.drawChoose(ctx, f);
 
-    this.drawZuko(ctx, f);
-    if (f.fileVisible) this.drawFile(ctx, f);
+    const col = this.ledColor(f);
+    this.drawZuko(ctx, f, wallTime, col);
+    if (f.fileVisible && f.docAlpha > 0.01) this.drawFile(ctx, f, wallTime, col);
   }
 
   // ── Drop zone text and chips ──────────────────────────────────────────────
@@ -201,7 +204,7 @@ export class UploadCanvas {
     const barLen = (x1 - x0) * f.barReveal;
 
     const name = State.droppedFile?.name ?? "file";
-    text(ctx, `Uploading ${name}`, x0, by - 30, `500 12.5px ${FONT}`, "#A9ADB5");
+    text(ctx, `Scanning ${name}`, x0, by - 30, `500 12.5px ${FONT}`, "#A9ADB5");
 
     if (f.check > 0) {
       ctx.save();
@@ -288,233 +291,189 @@ export class UploadCanvas {
     ctx.restore();
   }
 
-  // ── Zuko ─────────────────────────────────────────────────────────────────
+  // ── Zuko ──────────────────────────────────────────────────────────────────
 
-  private drawZuko(ctx: CanvasRenderingContext2D, f: UploadFrame) {
-    const R = f.d / 2 / 1.04;
-    const mc = Math.max(0, Math.min(f.morph, 1));
-
-    ctx.save();
-    ctx.translate(f.x, f.y + f.hop);
-    ctx.rotate(f.tilt);
-    ctx.scale(f.sx, f.sy);
-
-    const { rx, ry } = bodyPath(ctx, f.morph, R);
-
-    // Body.
-    const bg = ctx.createLinearGradient(rx * 0.7, -ry * 0.9, -rx * 0.8, ry * 0.9);
-    bg.addColorStop(0, "#EDEDEF");
-    bg.addColorStop(1, "#C4C5CA");
-    ctx.fillStyle = bg;
-    ctx.fill();
-
-    // Edge shadow.
-    const sg = ctx.createRadialGradient(0, 0, R * 0.2, 0, 0, R * 1.3);
-    sg.addColorStop(0, "rgba(0,0,0,0)");
-    sg.addColorStop(0.62, "rgba(0,0,0,0)");
-    sg.addColorStop(1, "rgba(0,0,0,0.12)");
-    ctx.fillStyle = sg;
-    ctx.fill();
-
-    // The body path is reused as a clip for everything drawn inside it.
-    ctx.save();
-    bodyPath(ctx, f.morph, R);
-    ctx.clip();
-
-    // Top rim, once Zuko is box-shaped enough to have one.
-    if (mc > 0.3) {
-      const a = Math.max(0, Math.min(1, (mc - 0.3) / 0.7));
-      ctx.beginPath();
-      ctx.moveTo(-rx * 0.72, -ry + 0.9);
-      ctx.lineTo(rx * 0.72, -ry + 0.9);
-      ctx.strokeStyle = `rgba(255,255,255,${0.6 * a})`;
-      ctx.lineWidth = 1.2;
-      ctx.lineCap = "round";
-      ctx.stroke();
-    }
-
-    // Mouth hole.
-    const mh = f.mouth * R * mc;
-    if (mh > 0.3) {
-      const mw = 2 * rx - 0.24 * R;
-      const mx = -mw / 2;
-      const my = -ry + 0.1 * R;
-      const g = ctx.createLinearGradient(0, my, 0, my + mh);
-      g.addColorStop(0, "#030304");
-      g.addColorStop(1, "#101114");
-      ctx.fillStyle = g;
-      rr(ctx, mx, my, mw, mh, Math.min(mw / 2, mh / 2));
-      ctx.fill();
-      if (mh > 4) {
-        const r = Math.min(mw / 2, mh / 2);
-        ctx.beginPath();
-        ctx.moveTo(mx + r, my + mh + 0.5);
-        ctx.lineTo(mx + mw - r, my + mh + 0.5);
-        ctx.strokeStyle = "rgba(255,255,255,0.55)";
-        ctx.lineWidth = 1;
-        ctx.lineCap = "round";
-        ctx.stroke();
-      }
-    }
-
-    // Eyes.
-    const ew = R * 0.25;
-    const eh = R * (0.62 - 0.16 * mc);
-    const ey = R * (0.02 + 0.28 * mc);
-    const sp = R * 0.3;
-    const lx = f.lookX * R * (0.34 - 0.08 * mc);
-    const ly = f.lookY * R * (0.16 - 0.09 * mc);
-    for (const sd of [-1, 1]) {
-      ctx.save();
-      ctx.translate(sd * sp + lx, ey + ly);
-      drawEye(ctx, f.eye, ew, eh);
-      ctx.restore();
-    }
-
-    ctx.restore(); // body clip
-    ctx.restore(); // transform
+  /** Teal while scanning; green once the file has its badge and when the bar completes. */
+  private ledColor(f: UploadFrame): RGB {
+    const ok = Math.max(clamp01(f.badge) * (1 - seg(f.pt, USC.T_CHEW_END, USC.T_SHRINK_END)), f.flash);
+    return mix3(LED.teal, LED.green, ok);
   }
 
-  // ── The file, and the suction ─────────────────────────────────────────────
+  /** Zuko's half width: the sequence's `d` is the old body box. */
+  private zukoR(f: UploadFrame): number {
+    return (f.d / 2) * 0.92;
+  }
 
-  private drawFile(ctx: CanvasRenderingContext2D, f: UploadFrame) {
-    const cx = f.cursorX;
-    const cy = f.cursorY + 14;
+  private drawZuko(ctx: CanvasRenderingContext2D, f: UploadFrame, wallTime: number, col: RGB) {
+    const b = this.bot;
+    const pt = f.pt;
+    b.clock = wallTime;
+    b.col = b.colT = col;
+    b.tint = 0.55;
+    b.glow = 1;
+    b.boot = 1;
+    b.ignite = 1;
+    b.flameLevel = 0.9;
+    b.flare = f.dropped ? Math.max(pulse(pt, USC.T_DROP, 0.6) * 0.7, pulse(pt, USC.T_CHEW1, 0.7)) : 0;
+    b.boost = f.dropped ? pulse(pt, USC.T_CHEW1, 0.6) * 0.6 : 0;
+    b.morph = Math.min(1, f.morph);
+    // The visor's own sweep runs while the file hovers; after the drop the
+    // beam leaves the visor instead.
+    b.slotH = f.dropped ? 0 : 0.1 + f.beam * 0.35;
+    b.slotHTarget = 0;
+    b.isScanning = false;
+    b.sx = f.sx;
+    b.sy = f.sy;
+    b.tilt = f.tilt;
+    b.yaw = f.lookX * 0.62;
+    b.pitch = f.lookY * 0.5;
+    b.eyeOverride = EYE[f.eye];
+    b.open = Math.min(blinkAt(pt, USC.T_CHEW_END + 0.2), blinkAt(pt, f.growEnd + 0.45));
+    b.badge = null;
+    b.drawAt(ctx, f.x, f.y + f.hop, this.zukoR(f));
+  }
 
-    if (f.suck <= 0) {
+  // ── The file, the scan beam and the badge ─────────────────────────────────
+
+  private drawFile(ctx: CanvasRenderingContext2D, f: UploadFrame, wallTime: number, col: RGB) {
+    const s = f.docScale;
+    const w = DOC_W * s;
+    const h = DOC_H * s;
+    const top = f.docY - h / 2;
+    const bot = f.docY + h / 2;
+    const R = this.zukoR(f);
+
+    // Scan line: a slow preview bob while hovering, one top → bottom sweep after the drop.
+    const lineY = f.dropped
+      ? lerp(top + 3 * s, bot - 3 * s, f.scan)
+      : f.docY + Math.sin(wallTime * 4.5) * h * 0.36;
+
+    // The beam leaves the visor edge facing the file, once the two are apart.
+    const side = f.docX >= f.x ? 1 : -1;
+    const ax = f.x + side * 0.66 * R * f.sx;
+    const ay = f.y + f.hop - 0.15 * R * f.sy;
+    const edge = f.docX - (side * w) / 2;
+    const beam = f.beam * f.docAlpha * clamp01((side * (edge - ax) - 4) / 10);
+
+    if (beam > 0.01) {
       ctx.save();
-      ctx.globalAlpha = 0.92;
-      drawDoc(ctx, cx, cy, 1, 1);
-      ctx.restore();
-      return;
-    }
-
-    const m = f.mouthRect;
-    const W0 = 34;
-    const H0 = 42;
-    const p = eIn(f.suck);
-    const topY = lerp(cy - H0 / 2, m.y - 2, eInOut(f.suck));
-    const hs = lerp(1.08, 0.55, eInOut(f.suck));
-    const Hh = H0 * hs;
-    const sc = lerp(1, 0.55, p);
-    const q = eOut(f.suck);
-    const fCx = lerp(cx, m.x + m.w / 2, eOut(f.suck));
-    const wob = Math.sin(f.suck * Math.PI * 2) * 0.1 * (1 - p);
-    const clipY = m.y + m.h * 0.5;
-
-    // The sheet is drawn as 28 horizontal strips, each narrowed towards the
-    // mouth, so the page appears to funnel in. Everything below the mouth line
-    // is clipped away — that is what makes it look swallowed.
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, USC.W, clipY);
-    ctx.clip();
-
-    for (let i = 0; i < 28; i++) {
-      const v0 = i / 28;
-      const wsc = lerp(1, lerp(0.92, (0.22 * m.w) / W0, Math.pow(v0, 1.2)), q) * sc;
-      const yy = topY + v0 * Hh;
-      const hh = Hh / 28 + 0.6;
-
-      ctx.save();
-      ctx.translate(fCx, yy);
-      ctx.rotate(wob);
+      const g = ctx.createLinearGradient(ax, 0, edge, 0);
+      g.addColorStop(0, rgba(col, 0.32 * beam));
+      g.addColorStop(1, rgba(col, 0.07 * beam));
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.rect((-W0 * wsc) / 2, 0, W0 * wsc, hh);
-      ctx.clip();
-      ctx.translate(-fCx, -yy);
-      drawDoc(ctx, fCx, topY + Hh / 2, wsc, hs);
-      ctx.restore();
-    }
-    ctx.restore();
-
-    // Green crumbs pulled in with the file.
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + 0.6;
-      const k = Math.max(0, Math.min(1, (f.suck - i * 0.08) / 0.7));
-      if (k <= 0 || k >= 1) continue;
-      const sx0 = cx + Math.cos(a) * 24;
-      const sy0 = cy + Math.sin(a) * 24;
-      const ex = m.x + m.w / 2;
-      const ey = m.y + m.h * 0.3;
-      const kk = Math.pow(k, 0.7);
-      const px = lerp(sx0, ex, kk);
-      const py = lerp(sy0, ey, kk) - Math.sin(Math.PI * k) * 6;
-      const rad = 2.2 * (1 - k * 0.5);
-      ctx.beginPath();
-      ctx.arc(px, py, rad, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(52,212,153,${1 - k})`;
+      ctx.moveTo(ax, ay - 1.5);
+      ctx.lineTo(edge, top);
+      ctx.lineTo(edge, bot);
+      ctx.lineTo(ax, ay + 1.5);
+      ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = rgba(mix3(col, WHITE, 0.4), 0.7 * beam);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(edge, lineY);
+      ctx.stroke();
+      ctx.restore();
     }
+
+    ctx.save();
+    ctx.globalAlpha = f.docAlpha;
+    drawDoc(ctx, f.docX, f.docY, s);
+
+    if (beam > 0.01) {
+      // The part of the page already scanned takes a faint tint.
+      if (f.dropped && f.scan > 0) {
+        ctx.save();
+        docPath(ctx, f.docX, f.docY, s);
+        ctx.clip();
+        ctx.fillStyle = rgba(col, 0.18 * beam);
+        ctx.fillRect(f.docX - w / 2, top, w, lineY - top);
+        ctx.restore();
+      }
+      ctx.save();
+      ctx.shadowColor = rgba(col, beam);
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = rgba(mix3(col, WHITE, 0.35), beam);
+      rr(ctx, f.docX - w / 2 - 3, lineY - 0.9, w + 6, 1.8, 0.9);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (f.badge > 0.01) drawShieldCheck(ctx, f.docX + w / 2 - 3 * s, bot - 6 * s, 8.5 * s * f.badge);
+    ctx.restore();
   }
 }
 
-// ── Eye shapes ──────────────────────────────────────────────────────────────
+// ── Shield-check badge ──────────────────────────────────────────────────────
 
-const INK = "#0E0F12";
-
-function drawEye(ctx: CanvasRenderingContext2D, shape: UploadEyeShape, w: number, h: number) {
-  switch (shape) {
-    case "pill":
-      ctx.fillStyle = INK;
-      rr(ctx, -w / 2, -h / 2, w, h, w / 2);
-      ctx.fill();
-      break;
-
-    case "cup": {
-      // Flat top, semicircular bottom.
-      const hh = h * 0.55;
-      ctx.beginPath();
-      ctx.moveTo(-w / 2, -hh / 2);
-      ctx.lineTo(w / 2, -hh / 2);
-      ctx.lineTo(w / 2, hh / 2 - w / 2);
-      ctx.arc(0, hh / 2 - w / 2, w / 2, 0, Math.PI, false);
-      ctx.closePath();
-      ctx.fillStyle = INK;
-      ctx.fill();
-      break;
-    }
-
-    case "content":
-      ctx.beginPath();
-      ctx.arc(0, -h * 0.12, w * 0.85, Math.PI * 0.15, Math.PI * 0.85, false);
-      ctx.strokeStyle = INK;
-      ctx.lineWidth = w * 0.5;
-      ctx.lineCap = "round";
-      ctx.stroke();
-      break;
-  }
+/** A small shield with a check mark: the file passed Zuko's scan. */
+function drawShieldCheck(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+  if (r <= 0.3) return;
+  ctx.save();
+  ctx.translate(cx, cy);
+  const p = shieldPath(r);
+  ctx.lineWidth = Math.max(1, r * 0.34);
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "#0B0F17";
+  ctx.stroke(p);
+  const g = ctx.createLinearGradient(0, -r, 0, r);
+  g.addColorStop(0, "#6EF0A0");
+  g.addColorStop(1, "#22B35E");
+  ctx.fillStyle = g;
+  ctx.fill(p);
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.42, -r * 0.04);
+  ctx.lineTo(-r * 0.1, r * 0.28);
+  ctx.lineTo(r * 0.46, -r * 0.36);
+  ctx.strokeStyle = "#062012";
+  ctx.lineWidth = Math.max(1, r * 0.24);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.stroke();
+  ctx.restore();
 }
 
 // ── Document icon ───────────────────────────────────────────────────────────
 
-/**
- * The generic sheet with a folded corner. macOS swaps in the real file icon from
- * NSWorkspace; Windows has no equivalent reachable from the webview, so this is
- * the shape in every case — it is the same fallback the Swift draws.
- */
-function drawDoc(ctx: CanvasRenderingContext2D, cx: number, cy: number, wsc: number, hsc: number) {
-  const w = 34 * wsc;
-  const h = 42 * hsc;
+/** The sheet outline with its folded corner, centred on (cx, cy). */
+function docPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, sc: number) {
+  const w = DOC_W * sc;
+  const h = DOC_H * sc;
   const x = cx - w / 2;
   const y = cy - h / 2;
-  const fold = 8 * Math.min(wsc, hsc);
+  const fold = 8 * sc;
+  const r = 2 * sc;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - fold, y);
+  ctx.lineTo(x + w, y + fold);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+/**
+ * The generic sheet with a folded corner and a few lines of text. macOS swaps
+ * in the real file icon; Windows has no equivalent reachable from the webview,
+ * so this is the shape in every case.
+ */
+function drawDoc(ctx: CanvasRenderingContext2D, cx: number, cy: number, sc: number) {
+  const w = DOC_W * sc;
+  const h = DOC_H * sc;
+  const x = cx - w / 2;
+  const y = cy - h / 2;
+  const fold = 8 * sc;
 
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.45)";
   ctx.shadowBlur = 8;
   ctx.shadowOffsetY = 3;
-  ctx.beginPath();
-  ctx.moveTo(x + 2, y);
-  ctx.lineTo(x + w - fold, y);
-  ctx.lineTo(x + w, y + fold);
-  ctx.lineTo(x + w, y + h - 2);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - 2, y + h);
-  ctx.lineTo(x + 2, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - 2);
-  ctx.lineTo(x, y + 2);
-  ctx.quadraticCurveTo(x, y, x + 2, y);
-  ctx.closePath();
+  docPath(ctx, cx, cy, sc);
   ctx.fillStyle = "#F4F4F6";
   ctx.fill();
   ctx.restore();
@@ -527,7 +486,10 @@ function drawDoc(ctx: CanvasRenderingContext2D, cx: number, cy: number, wsc: num
   ctx.fillStyle = "#D5D6DB";
   ctx.fill();
 
-  ctx.fillStyle = "#3B82F5";
-  rr(ctx, x + w * 0.18, y + h * 0.58, w * 0.64, h * 0.16, 2);
-  ctx.fill();
+  ctx.fillStyle = "#B4B9C3";
+  const lines: [number, number][] = [[0.3, 0.42], [0.43, 0.64], [0.54, 0.64], [0.65, 0.64], [0.76, 0.38]];
+  for (const [fy, fw] of lines) {
+    rr(ctx, x + w * 0.18, y + h * fy, w * fw, Math.max(1, h * 0.05), 1);
+    ctx.fill();
+  }
 }

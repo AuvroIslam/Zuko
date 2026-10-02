@@ -5,7 +5,7 @@ import { UploadCanvas } from "../src/upload/canvas";
 import { UploadSeq } from "../src/upload/sequence";
 import { State } from "../src/core/state";
 
-State.droppedFile = { name: "rapport-q3.pdf", path: "C:/tmp/rapport-q3.pdf" };
+State.droppedFile = { name: "report-q3.pdf", path: "C:/tmp/report-q3.pdf" };
 
 const stage = document.getElementById("stage")!;
 const clock = document.getElementById("clock")!;
