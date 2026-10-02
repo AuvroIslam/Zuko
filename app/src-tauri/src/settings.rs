@@ -60,6 +60,16 @@ pub fn local_dir() -> PathBuf {
     dir_override("ZUKO_DATA_DIR").unwrap_or_else(crate::platform::local_dir)
 }
 
+/// True when either directory is redirected (development and tests). Secrets then live
+/// under a separate keyring service (secrets.rs), so a development run can never read or
+/// replace the vault key of the real installation.
+pub fn dirs_overridden() -> bool {
+    #[cfg(test)]
+    return true;
+    #[cfg(not(test))]
+    return dir_override("ZUKO_CONFIG_DIR").is_some() || dir_override("ZUKO_DATA_DIR").is_some();
+}
+
 /// An absolute directory from `var`; relative or empty values are ignored so a
 /// stray variable can never scatter Zuko's data into the current directory.
 #[cfg(not(test))]
@@ -92,9 +102,7 @@ pub fn load() -> Settings {
 }
 
 pub fn save(settings: &Settings) -> std::io::Result<()> {
-    let dir = config_dir();
-    crate::platform::ensure_private_dir(&dir)?;
     let json = serde_json::to_vec_pretty(settings)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(settings_path(), json)
+    crate::files::write_atomic(&settings_path(), &json)
 }

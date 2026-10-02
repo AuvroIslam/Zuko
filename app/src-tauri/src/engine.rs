@@ -88,7 +88,7 @@ struct ProjectEntry {
 // ── Debounced vault persistence ───────────────────────────────────────────────
 
 /// How long a change waits for company before it is written.
-const PERSIST_DEBOUNCE: Duration = Duration::from_millis(250);
+const PERSIST_DEBOUNCE: Duration = Duration::from_millis(150);
 
 type Sink = Box<dyn Fn(&Vault) + Send + Sync>;
 
@@ -511,7 +511,7 @@ mod tests {
 
     #[test]
     fn a_burst_of_changes_is_one_write_of_the_last_state() {
-        let (e, p) = probe_engine(60, 0);
+        let (e, p) = probe_engine(400, 0);
         for n in 0..40 {
             add(&e, n);
         }
@@ -520,11 +520,11 @@ mod tests {
         assert_eq!(p.calls.load(Ordering::SeqCst), 1);
         assert_eq!(p.last_len.load(Ordering::SeqCst), 40);
         // The background writer finds nothing left to do.
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(600));
         assert_eq!(p.calls.load(Ordering::SeqCst), 1);
         // And it starts again for the next change.
         add(&e, 99);
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(Duration::from_millis(900));
         assert_eq!(p.calls.load(Ordering::SeqCst), 2);
         assert_eq!(p.last_len.load(Ordering::SeqCst), 41);
     }

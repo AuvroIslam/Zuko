@@ -23,6 +23,38 @@ pub fn inbox_dir() -> PathBuf {
     settings::local_dir().join("inbox")
 }
 
+/// Writes `bytes` to `target` so that a reader (or a crash) sees the old file or the
+/// whole new one, never a mix: a uniquely named temp file next to `target`, flushed to
+/// disk, then renamed over it. Creates the parent directory (private on Linux).
+pub fn write_atomic(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    if let Some(dir) = target.parent() {
+        crate::platform::ensure_private_dir(dir)?;
+    }
+    let mut tmp_name = target.as_os_str().to_owned();
+    tmp_name.push(format!(".tmp-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed)));
+    let tmp = PathBuf::from(tmp_name);
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let mut file = options.open(&tmp)?;
+        file.write_all(bytes)?;
+        // The rename must not publish a file whose bytes are still in a cache.
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, target)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
 pub fn ingest(source: &str) -> Result<DroppedFile, String> {
     let src = Path::new(source);
     let meta = std::fs::metadata(src).map_err(|e| format!("cannot read {source}: {e}"))?;
@@ -86,6 +118,30 @@ fn sweep(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn write_atomic_replaces_whole_files_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("zuko-wa-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let target = dir.join("nested").join("f.bin");
+        write_atomic(&target, b"first").unwrap();
+        write_atomic(&target, b"second, longer").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"second, longer");
+        // Concurrent writers: whichever lands last, the file is always one whole version.
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let target = target.clone();
+                std::thread::spawn(move || write_atomic(&target, format!("version {i}").repeat(50).as_bytes()).unwrap())
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let text = String::from_utf8(std::fs::read(&target).unwrap()).unwrap();
+        assert!((0..8).any(|i| text == format!("version {i}").repeat(50)));
+        assert_eq!(std::fs::read_dir(dir.join("nested")).unwrap().count(), 1, "no temp files left");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ingest_copies_and_never_overwrites() {

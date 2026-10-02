@@ -3,7 +3,11 @@
 // front end. The island may only ask whether a user key is present, and may never
 // see, set or clear the vault key (see `ui_may_touch`).
 
+#[cfg_attr(test, allow(dead_code))]
 const SERVICE: &str = "app.zuko.desktop";
+/// The service used while Zuko's directories are redirected (settings::dirs_overridden).
+#[cfg_attr(test, allow(dead_code))]
+const DEV_SERVICE: &str = "app.zuko.desktop.dev";
 
 /// The vault's encryption key (base64 of 32 bytes, vaultstore.rs). Internal: never
 /// reachable from the UI commands.
@@ -30,7 +34,8 @@ mod backend {
     use keyring::Entry;
 
     fn entry(key: &str) -> Result<Entry, String> {
-        Entry::new(super::SERVICE, key).map_err(|e| e.to_string())
+        let service = if crate::settings::dirs_overridden() { super::DEV_SERVICE } else { super::SERVICE };
+        Entry::new(service, key).map_err(|e| e.to_string())
     }
 
     pub fn get(key: &str) -> Result<Option<String>, String> {

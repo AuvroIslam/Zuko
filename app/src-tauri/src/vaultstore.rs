@@ -16,7 +16,6 @@
 // The key source is a trait so tests (and `cfg(test)` builds of the app) use an
 // in-memory key and never touch the real keyring.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -222,7 +221,7 @@ impl VaultStore {
             KeyState::Unreachable(e) => return Err(format!("keyring unreachable: {e}")),
         };
         let blob = encrypt(&key, vault.to_json().as_bytes())?;
-        write_atomic(&self.file, &blob).map_err(|e| format!("cannot write {}: {e}", self.file.display()))?;
+        crate::files::write_atomic(&self.file, &blob).map_err(|e| format!("cannot write {}: {e}", self.file.display()))?;
         *unverified = false;
         Ok(())
     }
@@ -271,32 +270,6 @@ fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Vault, String> {
         .map_err(|_| "authentication failed".to_string())?;
     let text = String::from_utf8(plain).map_err(|_| "not UTF-8".to_string())?;
     Vault::from_json(&text).map_err(|e| format!("bad vault JSON: {e}"))
-}
-
-/// Writes `bytes` next to `target` and renames it into place.
-pub(crate) fn write_atomic(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(dir) = target.parent() {
-        crate::platform::ensure_private_dir(dir)?;
-    }
-    let mut tmp_name = target.as_os_str().to_owned();
-    tmp_name.push(format!(".tmp-{}", std::process::id()));
-    let tmp = PathBuf::from(tmp_name);
-    let result = (|| {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut file = options.open(&tmp)?;
-        file.write_all(bytes)?;
-        // The rename must not publish a file whose bytes are still in a cache.
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&tmp, target)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
 }
 
 // ── The app's store ───────────────────────────────────────────────────────────

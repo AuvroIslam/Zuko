@@ -204,7 +204,7 @@ fn sanitize_into(engine: &Engine, path: &str, inbox: &Path) -> Result<(SanitizeR
     let stem = input.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "file".into());
     let stem: String = stem.chars().take(100).collect();
     let out_path = inbox.join(format!("{stem}.zuko.md"));
-    crate::vaultstore::write_atomic(&out_path, output.as_bytes()).map_err(|e| format!("Can't write {}: {e}", out_path.display()))?;
+    crate::files::write_atomic(&out_path, output.as_bytes()).map_err(|e| format!("Can't write {}: {e}", out_path.display()))?;
 
     let result = SanitizeResult {
         name,

@@ -331,7 +331,7 @@ fn mask_and_announce(
                 source: event_source,
                 event,
                 tool,
-                summary: summary.replace("{n}", &report.count.to_string()),
+                summary: summary.replace("{n}", &plural(report.count, "value")),
                 direction: "masked",
                 count: report.count,
                 keys: report.keys.clone(),
