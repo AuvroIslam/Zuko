@@ -8,10 +8,11 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/",
+    "test": "node --test \"tests/**/*.test.mjs\"",
     "icons": "node scripts/gen-icons.mjs",
     "key": "node scripts/gen-key.mjs",
-    "register-host": "node scripts/register-host.mjs"
+    "register-host": "node scripts/register-host.mjs",
+    "pretest": "tsc --noEmit"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
