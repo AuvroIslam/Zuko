@@ -1,7 +1,11 @@
-// Draws Zuko's face into the extension's toolbar icons (PNG 16/32/48/128): the navy
-// shield, dark glass visor with two teal LED eyes, and the ember flame on top. The
-// rasteriser and PNG encoder are the ones from app/scripts/gen-icons.mjs (same repo,
-// same character), with no dependencies beyond node:zlib.
+// Draws Zuko's head into the extension's toolbar icons (PNG 16/32/48/128), ported from
+// app/scripts/gen-icons.mjs (same character, same rasteriser): the glossy cream sphere,
+// two glowing amber almond eyes, the scar round his left eye (the viewer's
+// right), and the black topknot in its red hair-tie, all inside a dark outline
+// so it reads on light and dark taskbars alike. Small sizes drop detail and
+// chunk up the hair and eyes. No dependencies: the icons are rasterised here
+// and encoded with node:zlib, so the app icon stays "drawn in code" like the
+// character itself (src/character/engine.ts).
 //
 //   node scripts/gen-icons.mjs
 
@@ -12,35 +16,38 @@ import { fileURLToPath } from "node:url";
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "icons");
 
-// ── Palette ───────────────────────────────────────────────────────────────────
+// ── Palette (the concept sheet's) ─────────────────────────────────────────────
 
 const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
-const RIM = hex("#04060C");
-const BODY_TOP = hex("#323D62");
-const BODY_BOTTOM = hex("#121829");
-const RIM_LIGHT = hex("#8FA6E0");
-const VISOR = hex("#070A12");
-const VISOR_TOP = hex("#18213A");
-const LED = hex("#2EE6C5");
-const LED_CORE = hex("#D9FFF6");
-const FIRE_ROOT = hex("#F0520F");
-const FIRE_BASE = hex("#FF7A1A");
-const FIRE_TIP = hex("#FFD166");
-const CORE_BASE = hex("#FFAE3D");
-const CORE_TIP = hex("#FFF3C8");
+const OUTLINE = hex("#1E1310");
+const WHITE = hex("#FFFFFF");
+const CREAM = hex("#F7F3EE");
+const BEIGE = hex("#E8D5C4");
+const SHADE = hex("#CBAE96");
+const ORANGE = hex("#F28A1E");
+const EYE_CORE = hex("#FFF3CF");
+const EYE_MID = hex("#FFB347");
+const EYE_EDGE = hex("#B5400E");
+const SCAR = hex("#A83226");
+const SCAR_EDGE = hex("#7A2016");
+const HAIR = hex("#33221E");
+const HAIR_RIM = hex("#8A5A45");
+const TIE_DARK = hex("#6E1F18");
+const TIE = hex("#B33A2E");
+const TIE_LIGHT = hex("#D4523F");
+const GOLD = hex("#E0A030");
 
 const SS = 4; // supersampling factor
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const mix = (a, b, t) => [0, 1, 2].map((i) => lerp(a[i], b[i], clamp(t, 0, 1)));
-
-// ── Geometry (mirrors SHIELD and shieldPath() in src/character/engine.ts) ─────
-
-const SHIELD = {
-  halfW: 1.0, top: -0.86, corner: 0.36, bulge: 0.035, flankY: 0.24,
-  taperX: 0.58, taperY: 0.74, tipHalf: 0.16, tipY: 0.98,
+const smooth = (a, b, v) => {
+  const k = clamp((v - a) / (b - a), 0, 1);
+  return k * k * (3 - 2 * k);
 };
+
+// ── Geometry helpers ──────────────────────────────────────────────────────────
 
 const cubic = (p0, p1, p2, p3, n, out) => {
   for (let i = 1; i <= n; i++) {
@@ -52,43 +59,68 @@ const cubic = (p0, p1, p2, p3, n, out) => {
     ]);
   }
 };
-const quad = (p0, p1, p2, n, out) => {
-  for (let i = 1; i <= n; i++) {
-    const t = i / n;
-    const u = 1 - t;
-    out.push([u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0], u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1]]);
-  }
+
+const cubicAt = (p, s) => {
+  const u = 1 - s;
+  const a = u * u * u, b = 3 * u * u * s, c = 3 * u * s * s, d = s * s * s;
+  return [a * p[0] + b * p[2] + c * p[4] + d * p[6], a * p[1] + b * p[3] + c * p[5] + d * p[7]];
 };
 
-/** The shield outline as a polygon, centred on the origin, half width R. */
-function shieldPoly(R) {
-  const S = SHIELD;
-  const a = S.halfW * R, top = S.top * R, rc = S.corner * R, bulge = S.bulge * R;
-  const flankY = S.flankY * R, taperX = S.taperX * R, taperY = S.taperY * R;
-  const tipHalf = S.tipHalf * R, tipY = S.tipY * R;
-  const d = ((tipY - taperY) * tipHalf) / (2 * taperX - tipHalf);
-  const tipStartY = tipY - d, tipCtlY = tipY + d;
-  const ex = a - rc, k = rc * 0.55, tx = 0.6 * ex, ty = 1.33 * bulge;
-  const tl = Math.hypot(tx, ty) || 1;
-  const p = [[-ex, top]];
-  const N = 24;
-  cubic([-ex, top], [-0.4 * ex, top - ty], [0.4 * ex, top - ty], [ex, top], N, p);
-  cubic([ex, top], [ex + (tx / tl) * k, top + (ty / tl) * k], [a, top + rc - k], [a, top + rc], N, p);
-  cubic([a, top + rc], [a, flankY], [taperX, taperY], [tipHalf, tipStartY], N * 2, p);
-  quad([tipHalf, tipStartY], [0, tipCtlY], [-tipHalf, tipStartY], N, p);
-  cubic([-tipHalf, tipStartY], [-taperX, taperY], [-a, flankY], [-a, top + rc], N * 2, p);
-  cubic([-a, top + rc], [-a, top + rc - k], [-ex - (tx / tl) * k, top + (ty / tl) * k], [-ex, top], N, p);
-  p.pop(); // the last point repeats the first
+/** A tapered lock of hair along a cubic centre line (same profile as the engine). */
+function lockPoly(p, w, qx, qy, r, n = 24) {
+  const left = [];
+  const right = [];
+  let tip = [0, 0];
+  for (let i = 0; i <= n; i++) {
+    const s = i / n;
+    const [lx, ly] = cubicAt(p, s);
+    const [ax, ay] = cubicAt(p, Math.min(1, s + 0.02));
+    const [bx, by] = cubicAt(p, Math.max(0, s - 0.02));
+    let tx = ax - bx, ty = ay - by;
+    const l = Math.hypot(tx, ty) || 1;
+    tx /= l;
+    ty /= l;
+    const ww = w * r * (0.55 + 0.75 * Math.sin(Math.PI * s * 0.85)) * (1 - s * s * s);
+    const X = qx + lx * r;
+    const Y = qy + ly * r;
+    left.push([X - ty * ww, Y + tx * ww]);
+    right.push([X + ty * ww, Y - tx * ww]);
+    tip = [X, Y];
+  }
+  return [...left, tip, ...right.reverse()];
+}
+
+/** The almond eye (right eye; mirrored for the left): an oval with its top cut along a chord. */
+function almondPoly(cx, cy, w, h, cut, sd) {
+  const a0 = (cut[1] * Math.PI) / 180;
+  const a1 = (cut[0] * Math.PI) / 180;
+  const p = [];
+  const N = 40;
+  for (let i = 0; i <= N; i++) {
+    const a = a0 + ((a1 - a0) * i) / N;
+    p.push([cx + sd * Math.cos(a) * (w / 2), cy + Math.sin(a) * (h / 2)]);
+  }
   return p;
 }
 
-/** One flame tongue (same curve as tonguePath in the engine). */
-function tonguePoly(bx, by, w, h, tipX) {
-  const p = [[bx - w / 2, by]];
-  cubic([bx - w / 2, by], [bx - w * 0.55, by - h * 0.42], [tipX - w * 0.18, by - h * 0.72], [tipX, by - h], 20, p);
-  cubic([tipX, by - h], [tipX + w * 0.2, by - h * 0.7], [bx + w * 0.55, by - h * 0.4], [bx + w / 2, by], 20, p);
+/** The scar outline (engine.ts SCAR), in head radii round its centre. */
+function scarPoly(cx, cy, s) {
+  const p = [[-0.2, 0.2]];
+  const segs = [
+    [[-0.32, 0.05], [-0.3, -0.2], [-0.12, -0.28]],
+    [[-0.05, -0.31], [0.0, -0.29], [0.04, -0.37]],
+    [[0.08, -0.3], [0.13, -0.29], [0.2, -0.36]],
+    [[0.22, -0.28], [0.28, -0.24], [0.31, -0.18]],
+    [[0.38, -0.02], [0.33, 0.16], [0.18, 0.24]],
+    [[0.06, 0.3], [-0.1, 0.29], [-0.2, 0.2]],
+  ];
+  let last = p[0];
+  for (const [c1, c2, e] of segs) {
+    cubic(last, c1, c2, e, 10, p);
+    last = e;
+  }
   p.pop();
-  return p;
+  return p.map(([x, y]) => [cx + x * s, cy + y * s]);
 }
 
 /** Pushes every vertex `d` along its outward normal (polygons are smooth enough for this). */
@@ -150,56 +182,70 @@ function sdRoundBox(x, y, cx, cy, hw, hh, r) {
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
 }
 
-// ── Zuko ──────────────────────────────────────────────────────────────────────
+const circlePoly = (cx, cy, r, n = 96) =>
+  Array.from({ length: n }, (_, i) => [cx + Math.cos((i / n) * Math.PI * 2) * r, cy + Math.sin((i / n) * Math.PI * 2) * r]);
+
+// ── Zuko's head ───────────────────────────────────────────────────────────────
+
+/** Hair locks for the icon: the engine's, compressed so the head can stay big. */
+const LOCKS = [
+  { p: [0, 0, 0.05, -0.42, 0.76, -0.52, 1.0, 0.5], w: 0.21, min: 0 },
+  { p: [0, 0, -0.06, -0.34, 0.34, -0.5, 0.7, -0.38], w: 0.15, min: 32 },
+  { p: [0.02, -0.02, 0.5, -0.2, 0.92, -0.26, 1.16, 0.02], w: 0.11, min: 32 },
+  { p: [0.02, 0, 0.42, -0.12, 0.86, 0.06, 0.92, 0.66], w: 0.09, min: 48 },
+];
 
 function renderZuko(size) {
   const px = new Uint8Array(size * size * 4);
   const tiny = size <= 24;
   const small = size <= 48;
 
-  // Proportions: small icons drop detail and grow the face so it still reads.
-  const flameH = tiny ? 0.62 : 0.78;
-  const R = size * (tiny ? 0.41 : 0.375);
-  const rim = Math.max(tiny ? 0.85 : 1, R * 0.07);
-  const topY = SHIELD.top * R - flameH * R; // top of the flame
-  const botY = SHIELD.tipY * R;
-  const cx = size / 2;
-  const cy = size / 2 - (topY + botY) / 2;
+  // Layout: fit the whole silhouette — head, tie and hair — into the square,
+  // so the head is as big as the topknot allows.
+  const lockSet = LOCKS.filter((l) => size >= l.min);
+  const wk = tiny ? 1.45 : small ? 1.15 : 1;
+  const tieTopU = tiny ? -1.24 : -1.3;
+  let bx0 = -1, bx1 = 1, by0 = tieTopU, by1 = 1;
+  for (const l of lockSet) {
+    for (const [px, py] of lockPoly(l.p, l.w * wk, 0, tieTopU + 0.02, 1)) {
+      bx0 = Math.min(bx0, px); bx1 = Math.max(bx1, px);
+      by0 = Math.min(by0, py); by1 = Math.max(by1, py);
+    }
+  }
+  const rimU = tiny ? 0.11 : 0.085;
+  const fit = size / (Math.max(bx1 - bx0, by1 - by0) + 2 * rimU + 2 / size);
+  const r = fit;
+  const rim = Math.max(tiny ? 0.9 : 1, r * 0.075);
+  const cx = size / 2 - ((bx0 + bx1) / 2) * r;
+  const cy = size / 2 - ((by0 + by1) / 2) * r;
 
-  const body = shieldPoly(R);
-  const inner = offsetPoly(body, -Math.max(0.6, R * 0.09));
+  // Hair-tie and the hair spilling out of it (relative to the head centre).
+  const tieTop = tieTopU * r;
+  const tieBot = -0.92 * r;
+  const tieHW = (tiny ? 0.19 : small ? 0.14 : 0.12) * r;
+  const locks = lockSet.map((l) => lockPoly(l.p, l.w * wk, 0, tieTop + 0.02 * r, r));
+  const tiePoly = [
+    [-tieHW, tieTop], [tieHW, tieTop], [tieHW, tieBot], [-tieHW, tieBot],
+  ];
+  const head = circlePoly(0, 0, r);
 
-  // Flame tongues, rooted under the top of the head.
-  const baseY = SHIELD.top * R + R * 0.2;
-  const W = R * (tiny ? 0.72 : 0.62);
-  const H = R * flameH + R * 0.2;
-  const outer = tiny
-    ? [tonguePoly(0, baseY, W, H, 0.02 * H)]
-    : [
-        tonguePoly(-0.34 * W, baseY, 0.56 * W, 0.62 * H, -0.34 * W - 0.26 * 0.62 * H),
-        tonguePoly(0.36 * W, baseY, 0.52 * W, 0.54 * H, 0.36 * W + 0.28 * 0.54 * H),
-        tonguePoly(0, baseY, 0.84 * W, H, 0.03 * H),
-      ];
-  const core = tonguePoly(0.02 * W, baseY, (tiny ? 0.5 : 0.44) * W, (tiny ? 0.62 : 0.56) * H, 0.02 * W);
+  const inRim = rasterUnion(
+    [offsetPoly(head, rim), offsetPoly(tiePoly, rim), ...locks.map((p) => offsetPoly(p, rim))],
+    size, cx, cy,
+  );
+  const inHair = rasterUnion(locks, size, cx, cy);
+  const inHairCore = rasterUnion(locks.map((p) => offsetPoly(p, -Math.max(0.5, r * 0.05))), size, cx, cy);
 
-  const inRim = rasterUnion([offsetPoly(body, rim), ...outer.map((p) => offsetPoly(p, rim))], size, cx, cy);
-  const inBody = rasterPoly([body], size, cx, cy);
-  const inInner = rasterPoly([inner], size, cx, cy);
-  const inFlame = rasterUnion(outer, size, cx, cy);
-  const inCore = rasterPoly([core], size, cx, cy);
+  // Eyes and scar.
+  const [ew, eh, esp, ey] = tiny ? [0.36, 0.5, 0.4, 0.08] : small ? [0.33, 0.46, 0.38, 0.07] : [0.3, 0.42, 0.37, 0.07];
+  const cut = [196, -52];
+  const eyes = [-1, 1].map((sd) => almondPoly(sd * esp * r, ey * r, ew * r, eh * r, cut, sd));
+  const inEye = rasterUnion(eyes, size, cx, cy);
+  const inEyeCore = rasterUnion(eyes.map((p) => offsetPoly(p, -Math.max(0.5, ew * r * 0.12))), size, cx, cy);
+  const scar = tiny ? null : scarPoly(esp * r + 0.05 * r, ey * r - 0.07 * r, 1.32 * r);
+  const inScar = scar ? rasterPoly([scar], size, cx, cy) : () => false;
+  const inScarCore = scar ? rasterPoly([offsetPoly(scar, -Math.max(0.5, r * 0.035))], size, cx, cy) : () => false;
 
-  // Visor and LEDs (local coordinates, analytic).
-  const vcy = -0.2 * R;
-  const vhw = (tiny ? 0.84 : 0.8) * R;
-  const vhh = (tiny ? 0.34 : small ? 0.3 : 0.27) * R;
-  const vr = Math.min(vhh, 0.24 * R);
-  const ew = (tiny ? 0.25 : 0.19) * R; // half width
-  const eh = (tiny ? 0.15 : 0.1) * R; // half height
-  const esp = (tiny ? 0.4 : 0.36) * R;
-  const ey = vcy + 0.02 * R;
-  const glowR = R * 0.22;
-
-  const flameTop = baseY - H;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       let acc = [0, 0, 0];
@@ -211,42 +257,65 @@ function renderZuko(size) {
           if (!inRim(gx, gy)) continue;
           const lx = (gx + 0.5) / SS - cx;
           const ly = (gy + 0.5) / SS - cy;
-          let col = RIM;
-          if (inBody(gx, gy)) {
-            const t = (ly - SHIELD.top * R) / ((SHIELD.tipY - SHIELD.top) * R);
-            col = mix(BODY_TOP, BODY_BOTTOM, t);
-            // Cool rim light on the inner edge, strongest top-left.
-            if (!inInner(gx, gy)) {
-              const k = clamp(0.75 - (lx / R) * 0.25 - t * 0.7, 0.08, 0.75);
-              col = mix(col, RIM_LIGHT, k * (tiny ? 0.55 : 0.7));
+          const dc = Math.hypot(lx, ly);
+          let col = OUTLINE;
+
+          if (dc < r) {
+            // The glossy sphere: lit from the top left, a warm rim lower right.
+            const t = Math.hypot(lx + 0.36 * r, ly + 0.42 * r) / (1.3 * r);
+            col = t < 0.45 ? mix(WHITE, CREAM, t / 0.45) : t < 0.82 ? mix(CREAM, BEIGE, (t - 0.45) / 0.37) : mix(BEIGE, SHADE, (t - 0.82) / 0.18);
+            const warm = smooth(0.78, 1, dc / r) * clamp((lx + ly) / (1.2 * r), 0, 1);
+            col = mix(col, ORANGE, warm * 0.4);
+            // Specular highlight.
+            const hx = lx + 0.4 * r;
+            const hy = ly + 0.5 * r;
+            const ca = Math.cos(0.65), sa = Math.sin(0.65);
+            const ex = (hx * ca - hy * sa) / (0.3 * r);
+            const eyy = (hx * sa + hy * ca) / (0.17 * r);
+            const e2 = ex * ex + eyy * eyy;
+            if (e2 < 1) col = mix(col, WHITE, (1 - e2) * 0.9);
+            // The scar round the right eye.
+            if (inScar(gx, gy)) col = mix(col, inScarCore(gx, gy) ? SCAR : SCAR_EDGE, inScarCore(gx, gy) ? 0.55 : 0.6);
+            // Glow spilling round the eyes.
+            for (const sd of [-1, 1]) {
+              const dx = (lx - sd * esp * r) / (ew * r);
+              const dy = (ly - ey * r) / (eh * r);
+              const d = Math.hypot(dx, dy);
+              col = mix(col, EYE_MID, Math.exp(-Math.pow(Math.max(0, d - 0.4) / 0.42, 2)) * 0.5);
             }
-            // Visor.
-            const dv = sdRoundBox(lx, ly, 0, vcy, vhw, vhh, vr);
-            if (dv < 0) {
-              const vt = (ly - (vcy - vhh)) / (2 * vhh);
-              col = mix(VISOR_TOP, VISOR, clamp(vt * 2.2, 0, 1));
-              // LED eyes with a soft bloom.
-              let glow = 0;
-              let led = 0;
-              let hot = 0;
-              for (const sd of [-1, 1]) {
-                const de = sdRoundBox(lx, ly, sd * esp, ey, ew, eh, eh);
-                if (de < 0) {
-                  led = 1;
-                  if (sdRoundBox(lx, ly, sd * esp, ey, ew * 0.6, eh * 0.4, eh * 0.4) < 0 && !tiny) hot = 1;
+            if (inEye(gx, gy)) {
+              if (!inEyeCore(gx, gy)) col = EYE_EDGE;
+              else {
+                let best = 9;
+                for (const sd of [-1, 1]) {
+                  const dx = (lx - sd * esp * r + sd * 0.03 * r) / (ew * r * 0.5);
+                  const dy = (ly - ey * r - 0.06 * r) / (eh * r * 0.5);
+                  best = Math.min(best, Math.hypot(dx, dy));
                 }
-                glow = Math.max(glow, Math.exp(-Math.pow(Math.max(0, de) / glowR, 2)));
+                col = best < 0.42 ? mix(EYE_CORE, EYE_MID, best / 0.42) : mix(EYE_MID, ORANGE, (best - 0.42) / 0.58);
               }
-              col = mix(col, LED, glow * 0.45);
-              if (led) col = hot ? LED_CORE : mix(LED, LED_CORE, tiny ? 0.15 : 0.25);
-            } else if (dv < Math.max(0.7, R * 0.05)) {
-              col = mix(col, RIM, 0.75); // bezel
             }
-          } else if (inFlame(gx, gy)) {
-            const t = clamp((baseY - ly) / (baseY - flameTop), 0, 1);
-            col = t < 0.3 ? mix(FIRE_ROOT, FIRE_BASE, t / 0.3) : mix(FIRE_BASE, FIRE_TIP, (t - 0.3) / 0.7);
-            if (inCore(gx, gy)) col = mix(CORE_BASE, CORE_TIP, t * 1.4);
+          } else if (dc < r + rim * 0.55 && !inHair(gx, gy)) {
+            col = OUTLINE;
           }
+
+          // The topknot sits on the crown, over the head's edge.
+          const dTie = sdRoundBox(lx, ly, 0, (tieTop + tieBot) / 2, tieHW, (tieBot - tieTop) / 2, tieHW * 0.4);
+          if (dTie < 0) {
+            const k = (lx + tieHW) / (2 * tieHW);
+            col = k < 0.32 ? mix(TIE_DARK, TIE_LIGHT, k / 0.32) : mix(TIE_LIGHT, TIE_DARK, (k - 0.32) / 0.68 * 0.85);
+            if (!tiny && !small) {
+              const b1 = Math.abs(ly - (tieTop + 0.055 * r));
+              const b2 = Math.abs(ly - (tieBot - 0.07 * r));
+              if (Math.min(b1, b2) < Math.max(0.5, 0.025 * r)) col = GOLD;
+            }
+            if (dTie > -Math.max(0.6, r * 0.03)) col = mix(col, OUTLINE, 0.7);
+          } else if (dc >= r * 0.86 && Math.hypot(lx / (0.18 * r), (ly + 0.965 * r) / (0.075 * r)) < 1) {
+            col = HAIR;
+          } else if (inHair(gx, gy) && (dc >= r || ly < -0.9 * r)) {
+            col = inHairCore(gx, gy) ? HAIR : mix(HAIR, HAIR_RIM, tiny ? 0.5 : 0.8);
+          }
+
           acc = acc.map((v, i) => v + col[i]);
           alpha++;
         }
@@ -314,5 +383,5 @@ mkdirSync(OUT, { recursive: true });
 for (const size of [16, 32, 48, 128]) {
   const data = encodePNG(size, renderZuko(size));
   writeFileSync(join(OUT, `icon-${size}.png`), data);
-  console.log(`icons/icon-${size}.png — ${data.length} bytes`);
+  console.log(`icons/icon-${size}.png - ${data.length} bytes`);
 }
