@@ -124,6 +124,8 @@ impl Facts {
 
 /// Handles one relayed event. Returns the object the relay must print on stdout,
 /// or None for "no opinion". Must answer well within the relay's 1.5 s budget.
+/// (pipe.rs uses [`evaluate`] + [`Outcome::apply`] to answer before applying.)
+#[allow(dead_code)]
 pub async fn handle_event(app: &AppHandle, payload: &Value) -> Option<Value> {
     let out = evaluate(app, payload).await;
     out.apply(app);
