@@ -305,6 +305,11 @@ async fn permission_request(app: &AppHandle, pipe: &mut impl Relay, payload: Val
     }
     log::line(format!("hook PermissionRequest id={id}"));
     let _ = app.emit_to(WINDOW_LABEL, "hook", ui);
+    // Local AI on: an explanation follows as `ai-explain` when (and if) it is ready.
+    // The card and the decision never wait for it.
+    if let Some(job) = firewall::permission_explain(app, &payload, &id) {
+        crate::localai::spawn(app, job);
+    }
 
     let decision = wait_for_decision(&id, &mut rx).await;
     app.state::<Pending>().0.lock().unwrap().remove(&id);

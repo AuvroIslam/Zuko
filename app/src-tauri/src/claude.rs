@@ -19,6 +19,10 @@
 //   the system prompt so the model knows what each one stands for, without the values.
 // * The reply is rehydrated locally before it is returned to the island.
 // * Nothing here is logged with message content.
+// * Local AI (optional, `policy.localAi.deepScanPrompts`): the chat is interactive, so
+//   it waits (bounded by timeoutMs) for a deep scan of the message and the window
+//   title before masking. Values the model finds (and Zuko verifies) are interned and
+//   masked with everything else; a timeout or a bad answer changes nothing.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -128,6 +132,15 @@ where
     F: FnOnce(Value) -> Fut,
     Fut: Future<Output = Result<Value, String>>,
 {
+    if engine.policy().local_ai.scans_prompts() {
+        let mut text = query.clone();
+        if let Some(ChatContext::Window { title, .. }) = &context {
+            text = format!("{title}
+{text}");
+        }
+        // Stricter-only: this can only add vault entries before the masking below.
+        let _ = crate::localai::learn(engine, &text, false).await;
+    }
     let turn = prepare_turn(engine, chat.is_empty(), &query, context.as_ref())?;
     chat.push(json!({ "role": "user", "content": turn.content }));
     let history = chat.snapshot();

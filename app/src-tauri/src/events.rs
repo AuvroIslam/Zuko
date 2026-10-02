@@ -28,6 +28,10 @@ pub struct ActivityItem {
     pub headline: String,
     pub rules: Vec<String>,
     pub keys: Vec<String>,
+    /// Plain-English explanation from the local model (`localai.rs`), filled in after
+    /// the fact; display text only, never read by any decision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_explanation: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

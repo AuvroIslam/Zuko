@@ -17,6 +17,14 @@
 //   else), date and the masked labels with their vault keys, never values. Code and
 //   structured text (everything but .txt/.md) is fenced so it pastes cleanly.
 // * Sanitizing the same file again overwrites its `.zuko.md`.
+// * Local AI (optional, `policy.localAi.deepScanDocuments`): before masking, the
+//   document (already deterministically masked, so known secrets stay hidden even
+//   from the local model) is deep-scanned in chunks for names, addresses and other
+//   values the patterns miss. Verified findings are interned into the vault, so the
+//   normal masking pass below masks them like any other vault value. This waits, but
+//   only within a bounded budget (localai::learn_document); on a timeout or a bad
+//   answer the deterministic result stands and a warning says so. The result's
+//   `aiDeepScan` reports "+N items". The AI can only add masks, never remove one.
 
 use std::path::Path;
 
@@ -52,6 +60,22 @@ pub struct SanitizeResult {
     pub findings: Vec<FindingCount>,
     pub preview: String,
     pub warnings: Vec<String>,
+    /// What the local AI deep scan added (None when it is off).
+    pub ai_deep_scan: Option<AiDeepScan>,
+}
+
+/// The local AI's part in one sanitize (CONTRACTS.md `SanitizeResult.aiDeepScan`).
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDeepScan {
+    /// Values the model found (and Zuko verified) that the patterns had not masked.
+    pub items: usize,
+    /// Of those, values the vault had never seen.
+    pub new_items: usize,
+    pub model: String,
+    pub ms: u64,
+    /// Why the scan stopped early or failed, if it did.
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -176,7 +200,19 @@ pub fn extract(input: &Path) -> Result<Extracted, String> {
 
 fn sanitize_into(engine: &Engine, path: &str, inbox: &Path) -> Result<(SanitizeResult, MaskReport), String> {
     let input = Path::new(path);
-    let Extracted { kind, ext, name, body, pages, warnings } = extract(input)?;
+    let Extracted { kind, ext, name, body, pages, mut warnings } = extract(input)?;
+
+    // Optional local-AI deep scan first: it can only add vault entries, which the
+    // masking pass below then applies.
+    let ai_cfg = engine.policy().local_ai.clone();
+    let ai_deep_scan = ai_cfg.scans_documents().then(|| {
+        let (learned, note) = crate::localai::block_on(crate::localai::learn_document(engine, &format!("{name}
+{body}")));
+        if let Some(n) = &note {
+            warnings.push(n.clone());
+        }
+        AiDeepScan { items: learned.found, new_items: learned.new_keys.len(), model: ai_cfg.model.trim().to_string(), ms: learned.ms, error: note }
+    });
 
     // Mask the content and the original name in one pass over the vault.
     let det = engine.detector();
@@ -222,6 +258,7 @@ fn sanitize_into(engine: &Engine, path: &str, inbox: &Path) -> Result<(SanitizeR
         findings,
         preview: preview(&output),
         warnings,
+        ai_deep_scan,
     };
     Ok((result, report))
 }
@@ -458,6 +495,33 @@ mod tests {
         let p = dir.join(file);
         std::fs::write(&p, content).unwrap();
         sanitize_into(e, &p.to_string_lossy(), &dir.join("inbox"))
+    }
+
+    #[test]
+    fn the_local_ai_deep_scan_adds_names_and_addresses() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ollama = rt.block_on(crate::localai::mock::start(Default::default()));
+        let mut p = Policy::default();
+        p.local_ai.enabled = true;
+        p.local_ai.endpoint = ollama.url.clone();
+        let e = Engine::with_parts(p, Vault::new(), CtxBase::default());
+        let dir = tmp("ai");
+        let src = format!("Lease\nTenant: Rahim Uddin, House 12, Road 5, Dhanmondi, Dhaka\nOPENAI_API_KEY={KEY}\n");
+        let (r, report) = run(&e, &dir, "lease.md", src.as_bytes()).unwrap();
+        let out = std::fs::read_to_string(&r.output_path).unwrap();
+        assert!(!out.contains("Rahim Uddin") && !out.contains("Dhanmondi") && !out.contains(KEY), "{out}");
+        assert!(out.contains("{{NAME_1}}") && out.contains("{{ADDRESS_1}}") && out.contains("{{API_KEY_1}}"));
+        let ai = r.ai_deep_scan.as_ref().expect("the deep scan ran");
+        assert_eq!((ai.items, ai.new_items, ai.error.as_deref()), (2, 2, None));
+        assert_eq!(report.count, 3);
+        assert!(r.findings.iter().any(|f| f.label == "Person name"));
+        // The model never saw the API key.
+        assert!(!ollama.chat_bodies().concat().contains(KEY));
+
+        // Off: no deep scan, no field.
+        let (r, _) = run(&engine(), &dir, "lease2.md", src.as_bytes()).unwrap();
+        assert!(r.ai_deep_scan.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
