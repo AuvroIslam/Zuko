@@ -63,7 +63,10 @@ pub struct EntryView {
     pub hits: u64,
 }
 
+/// Serialized as `{"entries":[Entry…],"counters":{"KIND":n…}}`; missing fields default
+/// to empty, so `{}` is an empty vault.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Vault {
     entries: Vec<Entry>,
     /// Next number per kind.
