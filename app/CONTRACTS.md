@@ -75,6 +75,8 @@ New commands (JS argument names are camelCase):
 | `reveal_path` | `path: string` | `void` (shows a file in Explorer) |
 | `clipboard_mask` | — | `{ count: number }` (masks the clipboard text in place) |
 | `clipboard_unmask` | — | `{ count: number }` |
+| `localai_status` | `config: LocalAiConfig \| null` (unsaved draft; null = saved policy) | `LocalAiStatus` |
+| `localai_test` | `config: LocalAiConfig \| null` | `LocalAiTest` (deep scan of a made-up sentence; never touches the vault) |
 
 `approval_decision` gains an optional `elapsedMs: number` (time the card was on screen),
 used for rubber-stamp detection.
@@ -123,6 +125,7 @@ interface ActivityItem {
   headline: string;
   rules: string[];       // policy rule ids + invariant ids
   keys: string[];        // vault keys involved
+  aiExplanation?: string; // local AI text, attached when `ai-explain` arrives (display only)
 }
 
 interface SanitizeResult {
@@ -134,8 +137,53 @@ interface SanitizeResult {
   findings: { key: string; kind: string; label: string; count: number }[];
   preview: string;       // first ~1500 chars of the masked output
   warnings: string[];    // e.g. "No text layer found (scanned PDF?)"
+  aiDeepScan: AiDeepScan | null;  // null when the local AI is off for documents
+}
+
+interface AiDeepScan {   // shown as "AI deep scan: +N items"
+  items: number;         // verified values the model found that the patterns had not masked
+  newItems: number;      // of those, values the vault had never seen
+  model: string;
+  ms: number;
+  error: string | null;  // timeout / unusable answer / partial coverage (also in warnings)
+}
+
+// Policy.localAi (serde default: absent in old files = disabled). Global only: a
+// project's .zuko/policy.json cannot change it.
+interface LocalAiConfig {
+  enabled: boolean;            // default false
+  endpoint: string;            // default "http://127.0.0.1:11434"; loopback only (127.0.0.1, localhost, [::1])
+  model: string;               // default "gemma3:4b"
+  deepScanPrompts: boolean;    // default true
+  deepScanDocuments: boolean;  // default true
+  explainRisk: boolean;        // default true
+  waitForPromptScan: boolean;  // default false: gateway waits ≤ timeoutMs for the newest prompt's scan
+  timeoutMs: number;           // default 8000, 500..120000
+}
+
+interface LocalAiStatus {
+  enabled: boolean; endpoint: string; model: string;
+  endpointOk: boolean;         // loopback check passed (otherwise nothing is sent)
+  reachable: boolean;          // GET /api/tags answered
+  modelPresent: boolean;
+  models: string[];            // installed models
+  error: string | null;
+  hint: string | null;         // e.g. "ollama pull gemma3:4b"
+}
+
+interface LocalAiTest {
+  sample: string;
+  findings: { kind: string; value: string; label: string }[];  // each verified as an exact substring
+  ms: number;
+  error: string | null;
 }
 ```
+
+**Local AI rule:** the local model may only make Zuko stricter. Deterministic masking and
+the guard run first and stay authoritative; the model can add vault entries (masked by the
+normal passes from then on) and explanation text, never remove a mask or change a verdict.
+Its answers are strict JSON, every finding is verified as an exact substring of the text it
+was shown, labels are Zuko's own, and failures fall back to the deterministic result.
 
 ## 3. Events (Rust → frontend)
 
@@ -145,6 +193,7 @@ interface SanitizeResult {
 | `activity` | all windows | `ActivityItem` |
 | `privacy` | all windows | `PrivacyEvent` |
 | `protection-changed` | all windows | `ProtectionStatus` |
+| `ai-explain` | all windows | `{ requestId: string \| null, activityId: string \| null, text: string, model: string }` — a local AI explanation for an approval card (`requestId`) or a feed item (`activityId`); display only, labelled "AI explanation" |
 | `settings-changed`, `tray`, `screen-changed`, `cursor` | unchanged | unchanged |
 
 The `zuko` object on `hook` payloads for `PreToolUse` and `PermissionRequest`:
