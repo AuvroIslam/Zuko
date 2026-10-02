@@ -133,21 +133,59 @@ async fn handle(shared: Arc<Shared>, peer: SocketAddr, req: Request<Incoming>) -
     let Some(rest) = strip_token(req.uri().path(), &shared.token) else {
         return error(StatusCode::FORBIDDEN, "permission_error", "Zuko gateway: missing or invalid path token");
     };
-    let rest = rest.to_string();
-    let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
-    let upstream = shared.upstream();
-    let url = format!("{}{rest}{query}", upstream.trim_end_matches('/'));
-    let label = format!("{} {rest}{query}", req.method());
-
-    let route = match rest.as_str() {
+    // Routing looks at the path the upstream will act on, so `/v1/./messages`,
+    // `/v1//messages/` or `/v1/%6dessages` cannot slip past masking; such a request
+    // is forwarded to the canonical route.
+    let route = match canonical_path(rest).as_str() {
         MESSAGES if req.method() == Method::POST => Some(MESSAGES),
         COUNT_TOKENS if req.method() == Method::POST => Some(COUNT_TOKENS),
         _ => None,
     };
+    let path = route.unwrap_or(rest).to_string();
+    let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
+    let upstream = shared.upstream();
+    let url = format!("{}{path}{query}", upstream.trim_end_matches('/'));
+    let label = format!("{} {path}{query}", req.method());
     match route {
         Some(route) => masked(shared, req, route, url, upstream, label).await,
         None => passthrough(shared, req, url, upstream, label).await,
     }
+}
+
+/// `rest` percent-decoded, lowercased, with empty and dot segments resolved.
+fn canonical_path(rest: &str) -> String {
+    let mut segments: Vec<String> = Vec::new();
+    for seg in rest.split('/') {
+        let seg = percent_decode(seg).to_ascii_lowercase();
+        match seg.as_str() {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            _ => segments.push(seg),
+        }
+    }
+    format!("/{}", segments.join("/"))
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |c: u8| (c as char).to_digit(16);
+        match (b[i], b.get(i + 1).copied().and_then(hex), b.get(i + 2).copied().and_then(hex)) {
+            (b'%', Some(h), Some(l)) => {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+            }
+            (c, _, _) => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// `/t/<token>/rest` → `/rest` (`""` for `/t/<token>`); `None` if the token is
@@ -274,8 +312,9 @@ async fn masked(shared: Arc<Shared>, req: Request<Incoming>, route: &'static str
     };
     shared.host.trace(format!("{line} -> {}", resp.status().as_u16()));
 
+    // Nothing to rehydrate without vault entries (nor in error and compressed bodies).
     let rehydrate = match (route, m.vault) {
-        (MESSAGES, Some(vault)) if resp.status().is_success() && !encoded(resp.headers()) => vault,
+        (MESSAGES, Some(vault)) if !vault.is_empty() && resp.status().is_success() && !encoded(resp.headers()) => vault,
         _ => return verbatim(resp),
     };
     let ctype = resp

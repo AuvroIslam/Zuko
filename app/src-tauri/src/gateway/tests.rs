@@ -363,6 +363,18 @@ async fn count_tokens_is_masked() {
 }
 
 #[tokio::test]
+async fn path_tricks_cannot_skip_masking() {
+    let h = harness().await;
+    for path in ["/v1/./messages", "/v1//messages/", "/v1/%6Dessages", "/x/../V1/messages"] {
+        let resp = h.post(&format!("{path}?beta=true"), &prompt_request(false)).await;
+        assert_eq!(resp.status(), 200, "{path}");
+        let seen = h.seen();
+        assert_eq!(seen.last().unwrap().uri, "/v1/messages?beta=true", "{path}");
+        assert!(!h.last_body().contains(KEY), "{path}");
+    }
+}
+
+#[tokio::test]
 async fn rejects_bad_token_and_browsers() {
     let h = harness().await;
     let root = h.base.trim_end_matches(TOKEN).trim_end_matches("/t/").to_string();
