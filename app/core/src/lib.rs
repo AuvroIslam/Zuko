@@ -12,6 +12,8 @@
 //!   seen and enforces chain invariants, [`guard`] combines all of it into one
 //!   [`guard::Decision`], [`hookio`] renders Claude Code hook output, [`audit`] seals
 //!   tamper-evident receipts.
+//! * **Local AI (optional)** — [`localai`] holds the config, prompts, strict answer
+//!   validation and stricter-only merges for an on-device LLM; the app does the HTTP.
 //!
 //! Rules for this crate: no filesystem, network, clock or environment access (callers
 //! pass time and paths in through [`Ctx`] and parameters); no C dependencies; nothing
@@ -23,6 +25,7 @@ pub mod audit;
 pub mod detect;
 pub mod guard;
 pub mod hookio;
+pub mod localai;
 pub mod mask;
 pub mod placeholder;
 pub mod policy;
