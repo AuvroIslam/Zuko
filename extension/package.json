@@ -1,0 +1,24 @@
+{
+  "name": "zuko-extension",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Zuko browser extension: masks secrets and PII before they reach ChatGPT, claude.ai and DeepSeek",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/",
+    "icons": "node scripts/gen-icons.mjs",
+    "key": "node scripts/gen-key.mjs",
+    "register-host": "node scripts/register-host.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.0.0",
+    "typescript": "^5.8.0"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.3.289"
+  }
+}

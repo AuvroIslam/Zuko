@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "Zuko: privacy guard for AI chats",
+  "short_name": "Zuko",
+  "version": "0.1.1",
+  "description": "Masks API keys, secrets and personal data before they reach ChatGPT, claude.ai and DeepSeek, and restores them on your screen.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Zuko",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "permissions": [
+    "storage",
+    "offscreen",
+    "nativeMessaging",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://chat.deepseek.com/*"
+  ],
+  "background": {
+    "service_worker": "sw.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://chat.deepseek.com/*"
+      ],
+      "js": [
+        "net-guard.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://chat.deepseek.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArkQMP5/Iow+F2KmNO5MqiA89NgdZjh5Xb/lClKozwa1/RSilgk9T/EjIIURH2Z4jPcM8jFOlUIeOl0XeQVfBe/sfqMIHKHeZtBvUWH2md1a6hsSmW4RGRcajrBnYFa1dzfggo6CHxpLRTwp0Gu9SIek7JXeRvl7g04PoSa71Fu7+dHim9ybBlC42oKkvOHhB88+OwUDdu4fyOtnIDHehQCACB+LkLdyLw8OJGlrhCZyQo4yAv6sY8S9vs+YEJfTJTgVnMwAA2aZBChbF+2Ma6sJfmSWh+1VxWgJs8Fhm24hteWHs7/YTh5jgwWHpfBN4ywWFz2ltPj3pL4dtjV/y9wIDAQAB"
+}
