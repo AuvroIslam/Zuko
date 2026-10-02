@@ -183,9 +183,16 @@ fn sanitize_into(engine: &Engine, path: &str, inbox: &Path) -> Result<(SanitizeR
     let ctx = MaskCtx { source: "file".into(), now: crate::engine::now() };
     let (masked_body, masked_name, report) = engine.with_vault(|vault| {
         let (b, mut report) = mask::mask_text(&det, vault, &body, &ctx);
-        let (n, name_report) = mask::mask_text(&det, vault, &name, &ctx);
+        // The stem is scanned on its own: the detector rightly ignores things that
+        // look like file names (`icon@2x.png`), which would otherwise let
+        // `invoice bob@acme.io.txt` through as one harmless-looking token.
+        let (stem, ext) = match name.rfind('.') {
+            Some(i) if i > 0 => (&name[..i], &name[i..]),
+            _ => (name.as_str(), ""),
+        };
+        let (n, name_report) = mask::mask_text(&det, vault, stem, &ctx);
         report.absorb(name_report);
-        (b, n, report)
+        (b, format!("{n}{ext}"), report)
     });
     if report.count > 0 {
         engine.persist_vault();
