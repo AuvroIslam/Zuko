@@ -113,6 +113,7 @@ fn classify(path: &Path) -> Result<(Kind, String), String> {
 }
 
 /// Sanitizes `path` into the inbox (see the module doc).
+#[allow(dead_code)]
 pub fn sanitize_file(engine: &Engine, path: &str) -> Result<SanitizeResult, String> {
     sanitize_file_report(engine, path).map(|(result, _)| result)
 }

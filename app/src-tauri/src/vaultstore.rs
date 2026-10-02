@@ -58,6 +58,7 @@ impl KeySource for KeyringKey {
 }
 
 /// A key held in memory only (tests, and `cfg(test)` builds of the app).
+#[cfg(test)]
 #[derive(Default)]
 pub struct MemoryKey {
     value: Mutex<Option<String>>,
@@ -65,6 +66,7 @@ pub struct MemoryKey {
     pub unreachable: std::sync::atomic::AtomicBool,
 }
 
+#[cfg(test)]
 impl MemoryKey {
     pub fn with(value: &str) -> MemoryKey {
         MemoryKey { value: Mutex::new(Some(value.to_string())), ..Default::default() }
@@ -75,6 +77,7 @@ impl MemoryKey {
     }
 }
 
+#[cfg(test)]
 impl KeySource for MemoryKey {
     fn get(&self) -> Result<Option<String>, String> {
         if self.unreachable.load(std::sync::atomic::Ordering::Relaxed) {
@@ -123,10 +126,6 @@ pub struct VaultStore {
 impl VaultStore {
     pub fn new(file: PathBuf, keys: Box<dyn KeySource>) -> VaultStore {
         VaultStore { file, keys, unverified: Mutex::new(false), io: Mutex::new(()) }
-    }
-
-    pub fn file(&self) -> &Path {
-        &self.file
     }
 
     fn key(&self) -> KeyState {
