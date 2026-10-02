@@ -634,7 +634,7 @@ fn analyze_into(command: &str, dialect: Dialect, a: &mut ShellAnalysis, depth: u
         a.obfuscated = true;
         a.flag("obfuscated", "Uses obfuscated escapes");
     }
-    let subs = std::mem::take(&mut { lx.subs.clone() });
+    let subs = lx.subs;
     let pipelines = split_pipelines(lx.toks);
     for pipe in &pipelines {
         let mut programs: Vec<String> = Vec::new();

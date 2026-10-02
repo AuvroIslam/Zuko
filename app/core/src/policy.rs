@@ -583,8 +583,11 @@ pub fn glob_match(pattern: &str, path: &str, ctx: &Ctx) -> bool {
     if pat.ends_with('/') {
         pat.push_str("**");
     }
-    // A pattern without '/' matches a file name at any depth.
-    if !pat.contains('/') {
+    // A relative pattern (no drive, not rooted) matches at any depth, gitignore-style:
+    // `.env`, `src/**/*.rs` and `*.pem` all match anywhere under the tree.
+    let absolute = pat.starts_with('/')
+        || (pat.len() >= 2 && pat.as_bytes()[1] == b':' && pat.as_bytes()[0].is_ascii_alphabetic());
+    if !absolute && !pat.starts_with("**/") {
         pat = format!("**/{pat}");
     }
     let pat_segs: Vec<&str> = pat.split('/').filter(|s| !s.is_empty()).collect();
