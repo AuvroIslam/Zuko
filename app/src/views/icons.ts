@@ -38,4 +38,16 @@ export const ICONS = {
   stack: "M5 8h14v11.5H5V8zm1.8-3h10.4v1.6H6.8V5zm1.6-2.6h7.2V4H8.4V2.4z",
   // doc.text
   doc: "M6.5 2.6h7l4 4v14.8h-11V2.6zm6.6 1.6v3.3h3.3l-3.3-3.3zM8.6 11h6.8v1.5H8.6V11zm0 3.4h6.8v1.5H8.6v-1.5z",
+  // shield.fill
+  shield: "M12 2.4 4.2 5.5v6.2c0 4.8 3.3 8.6 7.8 9.9 4.5-1.3 7.8-5.1 7.8-9.9V5.5L12 2.4z",
+  // list.bullet (activity tab)
+  list: "M4 5.6h2.4V8H4V5.6zm4.4.4H20v1.6H8.4V6zM4 10.8h2.4v2.4H4v-2.4zm4.4.4H20v1.6H8.4v-1.6zM4 16h2.4v2.4H4V16zm4.4.4H20V18H8.4v-1.6z",
+  // nosign (stroke)
+  nosign: "M20.5 12a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0zM6 6l12 12",
+  // arrow.counterclockwise (stroke)
+  restore: "M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 3.8v4.6h4.6",
+  // doc.on.doc
+  copy: "M8 2.8h10.4c.9 0 1.6.7 1.6 1.6V15h-1.8V4.6H8V2.8zM5.4 6.6h9.4c.9 0 1.6.7 1.6 1.6v11.4c0 .9-.7 1.6-1.6 1.6H5.4c-.9 0-1.6-.7-1.6-1.6V8.2c0-.9.7-1.6 1.6-1.6zm.2 1.8v11h9V8.4h-9z",
+  // lock.fill
+  lock: "M7 10.2V7.6a5 5 0 0 1 10 0v2.6h1.4v10.6H5.6V10.2H7zm2 0h6V7.6a3 3 0 0 0-6 0v2.6z",
 } as const;
