@@ -864,6 +864,21 @@ fn recognize(program: &str, args: &[String], dialect: Dialect, a: &mut ShellAnal
             push_unique(&mut a.writes, &out);
             a.flag("write", format!("Saves a download to {out}"));
         }
+        // Uploads a local file as the request body: `-d @file`, `--data @file`,
+        // `--data-binary @file`, `-F k=@file`, `-T file`, `--upload-file file`.
+        for arg in args {
+            if let Some(at) = arg.rfind('@') {
+                let file = &arg[at + 1..];
+                if !file.is_empty() && !file.contains("://") && (arg.starts_with('@') || arg.contains("=@")) {
+                    push_unique(&mut a.reads, file);
+                    a.flag("network", format!("Sends the contents of {file} over the network"));
+                }
+            }
+        }
+        if let Some(f) = flag_value(args, &["-t", "--upload-file"]) {
+            push_unique(&mut a.reads, &f);
+            a.flag("network", format!("Uploads {f} over the network"));
+        }
     }
     if program == "rsync" && joined.contains(':') {
         a.network = true;
