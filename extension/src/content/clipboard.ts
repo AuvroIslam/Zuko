@@ -68,7 +68,8 @@ export function installCopyHandler(env: CopyEnv): void {
       const sel = env.doc.getSelection();
       const text = sel?.toString();
       if (!text || !e.clipboardData) return;
-      const anchor = sel?.anchorNode instanceof Element ? sel.anchorNode : (sel?.anchorNode?.parentElement ?? null);
+      const ElementCtor = (env.doc.defaultView as (Window & typeof globalThis) | null)?.Element ?? Element;
+      const anchor = sel?.anchorNode instanceof ElementCtor ? (sel.anchorNode as Element) : (sel?.anchorNode?.parentElement ?? null);
       for (let p: Element | null = anchor; p; p = p.parentElement) if (isEditable(p)) return; // the user's own typing
       const matcher = env.matcher();
       if (matcher.size === 0 || !matcher.mightContain(text)) return;

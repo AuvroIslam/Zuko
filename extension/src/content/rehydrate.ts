@@ -35,6 +35,8 @@ export interface RehydratorOptions {
   onToggle?: (revealed: boolean) => void;
   /** Debounce for mutation bursts (ms). */
   delayMs?: number;
+  /** How long text must sit unchanged before a placeholder at its very end is restored (ms). */
+  settleMs?: number;
 }
 
 interface NodeRecord {
@@ -73,12 +75,16 @@ export class Rehydrator {
   private readonly onRestored: RehydratorOptions["onRestored"];
   private readonly onToggle: RehydratorOptions["onToggle"];
   private readonly delayMs: number;
+  private readonly settleMs: number;
 
   private matcher: VariantMatcher;
   private records = new WeakMap<Text, NodeRecord>();
   private tracked = new Set<WeakRef<Text>>();
   private dirty = new Set<Node>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Blocks whose text ends in a placeholder that may still be growing (streaming). */
+  private deferred = new Set<Element>();
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private observer: MutationObserver | null = null;
   private highlight: any = null;
   private revealed = true;
@@ -92,6 +98,7 @@ export class Rehydrator {
     this.onRestored = opts.onRestored;
     this.onToggle = opts.onToggle;
     this.delayMs = opts.delayMs ?? 60;
+    this.settleMs = opts.settleMs ?? 800;
     this.matcher = new VariantMatcher(this.source.keys());
   }
 
@@ -131,7 +138,10 @@ export class Rehydrator {
     this.observer?.disconnect();
     this.observer = null;
     if (this.timer) clearTimeout(this.timer);
+    if (this.settleTimer) clearTimeout(this.settleTimer);
     this.timer = null;
+    this.settleTimer = null;
+    this.deferred.clear();
     this.revert();
   }
 
@@ -162,10 +172,40 @@ export class Rehydrator {
   }
 
   /** Processes everything pending right now (tests and the first paint). */
-  async flushNow(): Promise<void> {
+  async flushNow(opts: { settle?: boolean } = {}): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     await this.flush();
+    if (opts.settle) await this.settle();
+  }
+
+  /** Restores placeholders that sat at the very end of text which has since stopped changing. */
+  private async settle(): Promise<void> {
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = null;
+    if (!this.revealed || this.deferred.size === 0) return;
+    const blocks = [...this.deferred];
+    this.deferred.clear();
+    const skipCache = new Map<Element, boolean>();
+    let restored = 0;
+    const keys = new Set<string>();
+    const need = new Set<string>();
+    for (const b of blocks) {
+      if (!b.isConnected) continue;
+      const r = this.processBlock(b, need, skipCache, true);
+      restored += r.count;
+      r.keys.forEach((k) => keys.add(k));
+    }
+    if (need.size > 0) {
+      await this.source.load([...need]).catch(() => undefined);
+      for (const b of blocks) {
+        if (!b.isConnected) continue;
+        const r = this.processBlock(b, new Set(), skipCache, true);
+        restored += r.count;
+        r.keys.forEach((k) => keys.add(k));
+      }
+    }
+    if (restored > 0) this.onRestored?.(restored, [...keys]);
   }
 
   // ---- scheduling -----------------------------------------------------------------------
@@ -205,12 +245,17 @@ export class Rehydrator {
     const keys = new Set<string>();
     for (const b of blocks) {
       if (!b.isConnected) continue;
-      const r = this.processBlock(b, need, skipCache);
+      const r = this.processBlock(b, need, skipCache, false);
       restored += r.count;
       r.keys.forEach((k) => keys.add(k));
       if (r.unresolved) retry.push(b);
+      if (r.deferred) this.deferred.add(b);
     }
     if (restored > 0) this.onRestored?.(restored, [...keys]);
+    if (this.deferred.size > 0) {
+      if (this.settleTimer) clearTimeout(this.settleTimer);
+      this.settleTimer = setTimeout(() => void this.settle(), this.settleMs);
+    }
 
     if (need.size > 0) {
       await this.source.load([...need]).catch(() => undefined);
@@ -219,8 +264,9 @@ export class Rehydrator {
       const more = new Set<string>();
       for (const b of retry) {
         if (!b.isConnected) continue;
-        const r = this.processBlock(b, new Set(), skipCache);
+        const r = this.processBlock(b, new Set(), skipCache, false);
         again += r.count;
+        if (r.deferred) this.deferred.add(b);
         r.keys.forEach((k) => more.add(k));
       }
       if (again > 0) this.onRestored?.(again, [...more]);
@@ -254,7 +300,12 @@ export class Rehydrator {
   }
 
   /** Restores every run of text under a block. */
-  private processBlock(block: Element, need: Set<string>, skipCache: Map<Element, boolean>): { count: number; keys: string[]; unresolved: boolean } {
+  private processBlock(
+    block: Element,
+    need: Set<string>,
+    skipCache: Map<Element, boolean>,
+    final: boolean,
+  ): { count: number; keys: string[]; unresolved: boolean; deferred: boolean } {
     // A run = consecutive text nodes sharing the same nearest block ancestor.
     const runs: Text[][] = [];
     let current: Text[] = [];
@@ -277,18 +328,20 @@ export class Rehydrator {
     let count = 0;
     const keys: string[] = [];
     let unresolved = false;
+    let deferred = false;
     for (const run of runs) {
-      const r = this.processRun(run, need);
+      const r = this.processRun(run, need, final);
       count += r.count;
       keys.push(...r.keys);
       unresolved ||= r.unresolved;
+      deferred ||= r.deferred;
     }
-    return { count, keys, unresolved };
+    return { count, keys, unresolved, deferred };
   }
 
   // ---- restoring ------------------------------------------------------------------------
 
-  private processRun(nodes: Text[], need: Set<string>): { count: number; keys: string[]; unresolved: boolean } {
+  private processRun(nodes: Text[], need: Set<string>, final: boolean): { count: number; keys: string[]; unresolved: boolean; deferred: boolean } {
     const texts = nodes.map((n) => n.nodeValue ?? "");
     const offsets: number[] = [];
     let joined = "";
@@ -298,14 +351,21 @@ export class Rehydrator {
     }
     const hasNote = joined.includes(NOTE_PREFIX) && NOTE_RE.test(joined);
     const mightHave = this.matcher.size > 0 && this.matcher.mightContain(joined);
-    if (!hasNote && !mightHave) return { count: 0, keys: [], unresolved: false };
+    if (!hasNote && !mightHave) return { count: 0, keys: [], unresolved: false, deferred: false };
 
     // Global edits over the joined text, non-overlapping, in order.
     const edits: Array<{ start: number; end: number; value: string; key?: string }> = [];
     let unresolved = false;
+    let deferred = false;
     if (hasNote) edits.push({ start: 0, end: NOTE_RE.exec(joined)![0].length, value: "" });
     if (mightHave) {
       for (const v of this.matcher.find(joined)) {
+        // Streaming: text that ends mid-placeholder may still grow ("{{API_KEY_1" -> "{{API_KEY_1}}",
+        // "API_KEY_1" -> "API_KEY_12"). Wait for it to settle instead of restoring too early.
+        if (!final && !v.complete && v.end === joined.length) {
+          deferred = true;
+          continue;
+        }
         const value = this.source.value(v.key);
         if (value === undefined) {
           need.add(v.key);
@@ -316,7 +376,7 @@ export class Rehydrator {
         edits.push({ start: v.start, end: v.end, value, key: v.key });
       }
     }
-    if (edits.length === 0) return { count: 0, keys: [], unresolved };
+    if (edits.length === 0) return { count: 0, keys: [], unresolved, deferred };
     edits.sort((a, b) => a.start - b.start);
 
     // Split the global edits into per-node edits: the first node a match touches gets the
@@ -372,7 +432,7 @@ export class Rehydrator {
       this.tracked.add(new WeakRef(node));
       this.paint(node, rec);
     });
-    return { count: keys.length, keys, unresolved };
+    return { count: keys.length, keys, unresolved, deferred };
   }
 
   // ---- highlighting ---------------------------------------------------------------------

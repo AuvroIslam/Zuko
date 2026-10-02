@@ -66,6 +66,20 @@ export interface VariantMatch {
   key: string;
   /** The text as it appeared. */
   text: string;
+  /**
+   * False when more streamed characters could still change what this is: an opening bracket
+   * with no closing one yet, a bare key (`API_KEY_1` may become `API_KEY_12`), or a half
+   * closed `{{KEY}`. Callers that see this at the very end of growing text should wait.
+   */
+  complete: boolean;
+}
+
+function isComplete(open: string | undefined, close: string | undefined): boolean {
+  if (!close) return false;
+  if (!open) return true;
+  const o = open.trim();
+  const c = close.trim();
+  return o.length === 2 ? c.length === 2 : c.length === 1;
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -145,7 +159,7 @@ export class VariantMatcher {
         if (!open && isWord(text[start - 1])) continue;
         if (!close && isWord(text[end])) continue;
       }
-      out.push({ start, end, key, text: whole });
+      out.push({ start, end, key, text: whole, complete: isComplete(open, close) });
     }
     return out;
   }

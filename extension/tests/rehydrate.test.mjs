@@ -184,6 +184,30 @@ test("streaming: a placeholder arriving token by token is restored once complete
   r.stop();
 });
 
+test("streaming never restores a half-written placeholder: API_KEY_1 growing into API_KEY_12 stays untouched", async () => {
+  const { doc, r } = setup();
+  const p = doc.createElement("p");
+  const node = doc.createTextNode("");
+  p.appendChild(node);
+  q(doc, '[data-message-author-role="assistant"] .markdown').appendChild(p);
+  r.start();
+  await r.flushNow();
+  node.nodeValue = "use API_KEY_1";
+  await r.flushNow();
+  assert.equal(node.nodeValue, "use API_KEY_1", "a bare key at the very end waits: more digits may follow");
+  node.nodeValue = "use API_KEY_12";
+  await r.flushNow({ settle: true });
+  assert.equal(node.nodeValue, "use API_KEY_12", "API_KEY_12 is not a known key, so nothing is replaced");
+  node.nodeValue = "use API_KEY_1";
+  await r.flushNow();
+  await r.flushNow({ settle: true });
+  assert.equal(node.nodeValue, `use ${KEY}`, "once the text stops changing the trailing key is restored");
+  node.nodeValue = "tail {{API_KEY_1";
+  await r.flushNow({ settle: true });
+  assert.equal(node.nodeValue, `tail ${KEY}`, "an unterminated placeholder is restored after it settles");
+  r.stop();
+});
+
 test("values load on demand: unresolved keys are fetched once, then restored", async () => {
   const { doc, r, source } = setup({ lazy: true });
   r.start();
