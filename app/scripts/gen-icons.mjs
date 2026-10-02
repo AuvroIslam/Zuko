@@ -1,6 +1,8 @@
-// Draws Zuko into the PNG/ICO set Tauri needs. No dependencies: the icons are
-// rasterised here and encoded with node:zlib, so the app icon stays "drawn in
-// code" like the character itself.
+// Draws Zuko's face into the PNG/ICO set Tauri needs: the navy shield, the dark
+// glass visor with two teal LED eyes, and the ember flame on top, all inside a
+// dark rim so it reads on light and dark taskbars alike. No dependencies: the
+// icons are rasterised here and encoded with node:zlib, so the app icon stays
+// "drawn in code" like the character itself.
 //
 //   node scripts/gen-icons.mjs
 
@@ -11,98 +13,252 @@ import { fileURLToPath } from "node:url";
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "src-tauri", "icons");
 
-// ── Zuko ─────────────────────────────────────────────────────────────────────
+// ── Palette ───────────────────────────────────────────────────────────────────
 
-const BASE_TOP = [255, 250, 245]; // #FFFAF5
-const BASE_BOTTOM = [221, 204, 191]; // #DDCCBF
-const INK = [26, 20, 18]; // #1A1412
-const RIM = [0, 0, 0];
+const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const RIM = hex("#04060C");
+const BODY_TOP = hex("#323D62");
+const BODY_BOTTOM = hex("#121829");
+const RIM_LIGHT = hex("#8FA6E0");
+const VISOR = hex("#070A12");
+const VISOR_TOP = hex("#18213A");
+const LED = hex("#2EE6C5");
+const LED_CORE = hex("#D9FFF6");
+const FIRE_ROOT = hex("#F0520F");
+const FIRE_BASE = hex("#FF7A1A");
+const FIRE_TIP = hex("#FFD166");
+const CORE_BASE = hex("#FFAE3D");
+const CORE_TIP = hex("#FFF3C8");
 
 const SS = 4; // supersampling factor
 
-/** Superellipse (exponent 2.7) test in body-local coordinates. */
-function insideBody(x, y, rx, ry) {
-  const n = 2.7;
-  return Math.pow(Math.abs(x / rx), n) + Math.pow(Math.abs(y / ry), n) <= 1;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const mix = (a, b, t) => [0, 1, 2].map((i) => lerp(a[i], b[i], clamp(t, 0, 1)));
+
+// ── Geometry (mirrors SHIELD and shieldPath() in src/character/engine.ts) ─────
+
+const SHIELD = {
+  halfW: 1.0, top: -0.86, corner: 0.36, bulge: 0.035, flankY: 0.24,
+  taperX: 0.58, taperY: 0.74, tipHalf: 0.16, tipY: 0.98,
+};
+
+const cubic = (p0, p1, p2, p3, n, out) => {
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const u = 1 - t;
+    out.push([
+      u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
+      u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1],
+    ]);
+  }
+};
+const quad = (p0, p1, p2, n, out) => {
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const u = 1 - t;
+    out.push([u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0], u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1]]);
+  }
+};
+
+/** The shield outline as a polygon, centred on the origin, half width R. */
+function shieldPoly(R) {
+  const S = SHIELD;
+  const a = S.halfW * R, top = S.top * R, rc = S.corner * R, bulge = S.bulge * R;
+  const flankY = S.flankY * R, taperX = S.taperX * R, taperY = S.taperY * R;
+  const tipHalf = S.tipHalf * R, tipY = S.tipY * R;
+  const d = ((tipY - taperY) * tipHalf) / (2 * taperX - tipHalf);
+  const tipStartY = tipY - d, tipCtlY = tipY + d;
+  const ex = a - rc, k = rc * 0.55, tx = 0.6 * ex, ty = 1.33 * bulge;
+  const tl = Math.hypot(tx, ty) || 1;
+  const p = [[-ex, top]];
+  const N = 24;
+  cubic([-ex, top], [-0.4 * ex, top - ty], [0.4 * ex, top - ty], [ex, top], N, p);
+  cubic([ex, top], [ex + (tx / tl) * k, top + (ty / tl) * k], [a, top + rc - k], [a, top + rc], N, p);
+  cubic([a, top + rc], [a, flankY], [taperX, taperY], [tipHalf, tipStartY], N * 2, p);
+  quad([tipHalf, tipStartY], [0, tipCtlY], [-tipHalf, tipStartY], N, p);
+  cubic([-tipHalf, tipStartY], [-taperX, taperY], [-a, flankY], [-a, top + rc], N * 2, p);
+  cubic([-a, top + rc], [-a, top + rc - k], [-ex - (tx / tl) * k, top + (ty / tl) * k], [-ex, top], N, p);
+  p.pop(); // the last point repeats the first
+  return p;
 }
 
-function insidePill(x, y, w, h) {
-  const hw = w / 2;
-  const hh = h / 2;
-  const r = Math.min(hw, hh);
-  const cx = Math.max(-hw + r, Math.min(hw - r, x));
-  const cy = Math.max(-hh + r, Math.min(hh - r, y));
-  return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
+/** One flame tongue (same curve as tonguePath in the engine). */
+function tonguePoly(bx, by, w, h, tipX) {
+  const p = [[bx - w / 2, by]];
+  cubic([bx - w / 2, by], [bx - w * 0.55, by - h * 0.42], [tipX - w * 0.18, by - h * 0.72], [tipX, by - h], 20, p);
+  cubic([tipX, by - h], [tipX + w * 0.2, by - h * 0.7], [bx + w * 0.55, by - h * 0.4], [bx + w / 2, by], 20, p);
+  p.pop();
+  return p;
 }
+
+/** Pushes every vertex `d` along its outward normal (polygons are smooth enough for this). */
+function offsetPoly(poly, d) {
+  const n = poly.length;
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const [x0, y0] = poly[i];
+    const [x1, y1] = poly[(i + 1) % n];
+    area += x0 * y1 - x1 * y0;
+  }
+  const s = area > 0 ? 1 : -1;
+  return poly.map((p, i) => {
+    const a = poly[(i - 1 + n) % n];
+    const b = poly[(i + 1) % n];
+    let nx = (b[1] - a[1]) * s;
+    let ny = -(b[0] - a[0]) * s;
+    const l = Math.hypot(nx, ny) || 1;
+    nx /= l;
+    ny /= l;
+    return [p[0] + nx * d, p[1] + ny * d];
+  });
+}
+
+/** Even-odd inside test with crossings precomputed per subsample row. */
+function rasterPoly(polys, size, ox, oy) {
+  const rows = new Array(size * SS);
+  for (let r = 0; r < size * SS; r++) {
+    const y = (r + 0.5) / SS - oy;
+    const xs = [];
+    for (const poly of polys) {
+      for (let i = 0; i < poly.length; i++) {
+        const [x0, y0] = poly[i];
+        const [x1, y1] = poly[(i + 1) % poly.length];
+        if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) xs.push(x0 + ((y - y0) / (y1 - y0)) * (x1 - x0) + ox);
+      }
+    }
+    rows[r] = xs.sort((a, b) => a - b);
+  }
+  // Union of polygons: inside when the point is within any span pair of any polygon.
+  return (sx, sy) => {
+    const xs = rows[sy];
+    const x = (sx + 0.5) / SS;
+    let c = 0;
+    for (const v of xs) if (v < x) c++;
+    return (c & 1) === 1;
+  };
+}
+
+/** Union test: one rasteriser per polygon (overlapping polygons would cancel under even-odd). */
+function rasterUnion(polys, size, ox, oy) {
+  const testers = polys.map((p) => rasterPoly([p], size, ox, oy));
+  return (sx, sy) => testers.some((t) => t(sx, sy));
+}
+
+/** Signed distance to a rounded box centred on (cx, cy). */
+function sdRoundBox(x, y, cx, cy, hw, hh, r) {
+  const qx = Math.abs(x - cx) - hw + r;
+  const qy = Math.abs(y - cy) - hh + r;
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
+}
+
+// ── Zuko ──────────────────────────────────────────────────────────────────────
 
 function renderZuko(size) {
   const px = new Uint8Array(size * size * 4);
-  const R = size * 0.34;
-  const rx = R * 1.14;
-  const ry = R * 0.88;
+  const tiny = size <= 24;
+  const small = size <= 48;
+
+  // Proportions: small icons drop detail and grow the face so it still reads.
+  const flameH = tiny ? 0.62 : 0.78;
+  const R = size * (tiny ? 0.41 : 0.375);
+  const rim = Math.max(tiny ? 0.85 : 1, R * 0.07);
+  const topY = SHIELD.top * R - flameH * R; // top of the flame
+  const botY = SHIELD.tipY * R;
   const cx = size / 2;
-  const cy = size / 2 + R * 0.06;
-  const rim = R * 0.055; // dark outline so the tray icon reads on light themes
+  const cy = size / 2 - (topY + botY) / 2;
 
-  // Eyes — same geometry as BotEngine (yaw ±0.37, pitch −0.12)
-  const eyeYaw = 0.37;
-  const eyePitch = -0.12;
-  const cp = Math.cos(eyePitch);
-  const ex = Math.sin(eyeYaw) * cp * rx;
-  const ey = -Math.sin(eyePitch) * ry;
-  const fx = Math.max(0.18, Math.cos(eyeYaw));
-  const fy = Math.max(0.18, cp);
-  const ew = R * 0.25 * fx;
-  const eh = R * 0.27 * fy;
+  const body = shieldPoly(R);
+  const inner = offsetPoly(body, -Math.max(0.6, R * 0.09));
 
+  // Flame tongues, rooted under the top of the head.
+  const baseY = SHIELD.top * R + R * 0.2;
+  const W = R * (tiny ? 0.72 : 0.62);
+  const H = R * flameH + R * 0.2;
+  const outer = tiny
+    ? [tonguePoly(0, baseY, W, H, 0.02 * H)]
+    : [
+        tonguePoly(-0.34 * W, baseY, 0.56 * W, 0.62 * H, -0.34 * W - 0.26 * 0.62 * H),
+        tonguePoly(0.36 * W, baseY, 0.52 * W, 0.54 * H, 0.36 * W + 0.28 * 0.54 * H),
+        tonguePoly(0, baseY, 0.84 * W, H, 0.03 * H),
+      ];
+  const core = tonguePoly(0.02 * W, baseY, (tiny ? 0.5 : 0.44) * W, (tiny ? 0.62 : 0.56) * H, 0.02 * W);
+
+  const inRim = rasterUnion([offsetPoly(body, rim), ...outer.map((p) => offsetPoly(p, rim))], size, cx, cy);
+  const inBody = rasterPoly([body], size, cx, cy);
+  const inInner = rasterPoly([inner], size, cx, cy);
+  const inFlame = rasterUnion(outer, size, cx, cy);
+  const inCore = rasterPoly([core], size, cx, cy);
+
+  // Visor and LEDs (local coordinates, analytic).
+  const vcy = -0.2 * R;
+  const vhw = (tiny ? 0.84 : 0.8) * R;
+  const vhh = (tiny ? 0.34 : small ? 0.3 : 0.27) * R;
+  const vr = Math.min(vhh, 0.24 * R);
+  const ew = (tiny ? 0.25 : 0.19) * R; // half width
+  const eh = (tiny ? 0.15 : 0.1) * R; // half height
+  const esp = (tiny ? 0.4 : 0.36) * R;
+  const ey = vcy + 0.02 * R;
+  const glowR = R * 0.22;
+
+  const flameTop = baseY - H;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      let bodyHits = 0;
-      let rimHits = 0;
-      let eyeHits = 0;
+      let acc = [0, 0, 0];
+      let alpha = 0;
       for (let sy = 0; sy < SS; sy++) {
         for (let sx = 0; sx < SS; sx++) {
-          const px0 = x + (sx + 0.5) / SS - cx;
-          const py0 = y + (sy + 0.5) / SS - cy;
-          if (!insideBody(px0, py0, rx + rim, ry + rim)) continue;
-          rimHits++;
-          if (!insideBody(px0, py0, rx, ry)) continue;
-          bodyHits++;
-          if (
-            insidePill(px0 + ex, py0 - ey, ew, eh) ||
-            insidePill(px0 - ex, py0 - ey, ew, eh)
-          ) {
-            eyeHits++;
+          const gx = x * SS + sx;
+          const gy = y * SS + sy;
+          if (!inRim(gx, gy)) continue;
+          const lx = (gx + 0.5) / SS - cx;
+          const ly = (gy + 0.5) / SS - cy;
+          let col = RIM;
+          if (inBody(gx, gy)) {
+            const t = (ly - SHIELD.top * R) / ((SHIELD.tipY - SHIELD.top) * R);
+            col = mix(BODY_TOP, BODY_BOTTOM, t);
+            // Cool rim light on the inner edge, strongest top-left.
+            if (!inInner(gx, gy)) {
+              const k = clamp(0.75 - (lx / R) * 0.25 - t * 0.7, 0.08, 0.75);
+              col = mix(col, RIM_LIGHT, k * (tiny ? 0.55 : 0.7));
+            }
+            // Visor.
+            const dv = sdRoundBox(lx, ly, 0, vcy, vhw, vhh, vr);
+            if (dv < 0) {
+              const vt = (ly - (vcy - vhh)) / (2 * vhh);
+              col = mix(VISOR_TOP, VISOR, clamp(vt * 2.2, 0, 1));
+              // LED eyes with a soft bloom.
+              let glow = 0;
+              let led = 0;
+              let hot = 0;
+              for (const sd of [-1, 1]) {
+                const de = sdRoundBox(lx, ly, sd * esp, ey, ew, eh, eh);
+                if (de < 0) {
+                  led = 1;
+                  if (sdRoundBox(lx, ly, sd * esp, ey, ew * 0.6, eh * 0.4, eh * 0.4) < 0 && !tiny) hot = 1;
+                }
+                glow = Math.max(glow, Math.exp(-Math.pow(Math.max(0, de) / glowR, 2)));
+              }
+              col = mix(col, LED, glow * 0.45);
+              if (led) col = hot ? LED_CORE : mix(LED, LED_CORE, tiny ? 0.15 : 0.25);
+            } else if (dv < Math.max(0.7, R * 0.05)) {
+              col = mix(col, RIM, 0.75); // bezel
+            }
+          } else if (inFlame(gx, gy)) {
+            const t = clamp((baseY - ly) / (baseY - flameTop), 0, 1);
+            col = t < 0.3 ? mix(FIRE_ROOT, FIRE_BASE, t / 0.3) : mix(FIRE_BASE, FIRE_TIP, (t - 0.3) / 0.7);
+            if (inCore(gx, gy)) col = mix(CORE_BASE, CORE_TIP, t * 1.4);
           }
+          acc = acc.map((v, i) => v + col[i]);
+          alpha++;
         }
       }
-      if (rimHits === 0) continue;
-
-      const total = SS * SS;
-      const rimA = rimHits / total;
-      const bodyA = bodyHits / total;
-      const eyeA = eyeHits / total;
-
-      // Body gradient: top-right → bottom-left, like the Canvas gradient.
-      const t = Math.min(1, Math.max(0, ((x - cx) * -0.6 + (y - cy) * 0.8) / (2 * ry) + 0.5));
-      const body = [0, 1, 2].map((i) => BASE_TOP[i] + (BASE_BOTTOM[i] - BASE_TOP[i]) * t);
-
-      // rim under body, body over rim, eyes over body
-      let col = RIM.slice();
-      let alpha = rimA;
-      if (bodyA > 0) {
-        col = col.map((c, i) => c * (1 - bodyA / rimA) + body[i] * (bodyA / rimA));
-        alpha = rimA;
-      }
-      if (eyeA > 0) {
-        col = col.map((c, i) => c * (1 - eyeA) + INK[i] * eyeA);
-      }
-
+      if (alpha === 0) continue;
       const o = (y * size + x) * 4;
-      px[o] = Math.round(col[0]);
-      px[o + 1] = Math.round(col[1]);
-      px[o + 2] = Math.round(col[2]);
-      px[o + 3] = Math.round(Math.min(1, alpha) * 255);
+      px[o] = Math.round(acc[0] / alpha);
+      px[o + 1] = Math.round(acc[1] / alpha);
+      px[o + 2] = Math.round(acc[2] / alpha);
+      px[o + 3] = Math.round((alpha / (SS * SS)) * 255);
     }
   }
   return px;
@@ -198,3 +354,9 @@ for (const [name, data] of Object.entries(files)) {
 const ico = encodeICO([16, 24, 32, 48, 64, 128, 256].map((size) => ({ size, png: png(size) })));
 writeFileSync(join(OUT, "icon.ico"), ico);
 console.log(`icon.ico — ${ico.length} bytes`);
+
+// Optional: ICON_PREVIEW=<dir> also writes every ICO size as a PNG for review.
+if (process.env.ICON_PREVIEW) {
+  mkdirSync(process.env.ICON_PREVIEW, { recursive: true });
+  for (const size of [16, 24, 32, 48, 64]) writeFileSync(join(process.env.ICON_PREVIEW, `icon-${size}.png`), png(size));
+}

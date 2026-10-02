@@ -193,17 +193,38 @@ if (want("drop")) {
 }
 
 if (want("icons")) {
-  const row = section("App icon", "icons");
+  // Run `ICON_PREVIEW=node_modules/.icon-preview npm run icons` first for the
+  // exact ICO sizes; 128 px comes straight from src-tauri/icons.
+  const row = section("App icon (ICO sizes 16, 24, 32, 48, 64 at 1:1; 128 px)", "icons");
+  const v = Date.now();
   for (const bg of ["l", "m", "d"]) {
     const tile = document.createElement("div");
     tile.className = `tile ${bg}`;
-    for (const [file, px] of [["32x32.png", 16], ["32x32.png", 24], ["32x32.png", 32], ["128x128.png", 48], ["128x128.png", 128]] as const) {
+    for (const size of [16, 24, 32, 48, 64]) {
       const img = document.createElement("img");
-      img.src = `/src-tauri/icons/${file}?v=${Date.now()}`;
-      img.width = px;
-      img.height = px;
+      img.src = `/node_modules/.icon-preview/icon-${size}.png?v=${v}`;
+      img.width = size;
+      img.height = size;
       tile.append(img);
     }
+    const big = document.createElement("img");
+    big.src = `/src-tauri/icons/128x128.png?v=${v}`;
+    big.width = 128;
+    big.height = 128;
+    tile.append(big);
     row.append(tile);
+  }
+  const zoom = section("16 and 32 px, zoomed ×6", "icons");
+  for (const bg of ["l", "d"]) {
+    const tile = document.createElement("div");
+    tile.className = `tile ${bg}`;
+    for (const size of [16, 24, 32]) {
+      const img = document.createElement("img");
+      img.src = `/node_modules/.icon-preview/icon-${size}.png?v=${v}`;
+      img.width = size * 6;
+      img.height = size * 6;
+      tile.append(img);
+    }
+    zoom.append(tile);
   }
 }
