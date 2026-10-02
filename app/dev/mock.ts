@@ -489,6 +489,58 @@ const SCENES: Record<string, (island: Island) => void> = {
     State.isPinned = true;
     island.alert("settings");
   },
+  "hold-demo": () => {
+    permissionRequest("high");
+    window.setTimeout(() => {
+      document.querySelector<HTMLElement>(".view.on .btn.hold")
+        ?.dispatchEvent(new PointerEvent("pointerdown", { button: 0, bubbles: true }));
+    }, 700);
+  },
+  // Self-tests: the verdict lands in document.title. They need real frames, so
+  // read the title over DevTools after ~5 s rather than with --dump-dom.
+  "selftest-hold": () => {
+    permissionRequest("high");
+    const sent: unknown[] = [];
+    handlers.approval_decision = (a) => void sent.push(a);
+    const btn = () => document.querySelector<HTMLElement>(".view.on .btn.hold");
+    const press = () => btn()?.dispatchEvent(new PointerEvent("pointerdown", { button: 0, bubbles: true }));
+    const release = () => btn()?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    window.setTimeout(press, 300);
+    window.setTimeout(release, 900); // let go early: nothing may be sent
+    window.setTimeout(() => {
+      const early = sent.length;
+      press();
+      window.setTimeout(() => {
+        const ok = early === 0 && sent.length === 1 && State.pendingApproval === null;
+        document.title = `selftest-hold ${ok ? "PASS" : "FAIL"} early=${early} sent=${JSON.stringify(sent)} view=${State.view} mode=${State.mode} btn=${!!btn()} pending=${!!State.pendingApproval}`;
+      }, 2200);
+    }, 1200);
+  },
+  "selftest-guard": () => {
+    const sent: { elapsedMs?: number }[] = [];
+    handlers.approval_decision = (a) => void sent.push(a);
+    let round = 0;
+    const next = () => {
+      if (round === 3) {
+        // Fourth medium card: the guard must turn Allow into a 1.2 s hold.
+        permissionRequest("medium");
+        window.setTimeout(() => {
+          const hold = document.querySelector<HTMLElement>(".view.on .btn.hold");
+          const ok = State.rubberStamp.armed && !!hold && hold.style.display !== "none";
+          document.title = `selftest-guard ${ok ? "PASS" : "FAIL"} armed=${State.rubberStamp.armed} decisions=${sent.length}`;
+        }, 400);
+        return;
+      }
+      round += 1;
+      permissionRequest("medium");
+      window.setTimeout(() => {
+        const allow = [...document.querySelectorAll<HTMLElement>(".view.on .btn.primary")].find((b) => b.textContent?.includes("Allow"));
+        allow?.click();
+        window.setTimeout(next, 150);
+      }, 200);
+    };
+    next();
+  },
 };
 
 export function playScene(name: string, island: Island) {

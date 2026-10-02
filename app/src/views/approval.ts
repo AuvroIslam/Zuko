@@ -248,9 +248,11 @@ export function buildApproval(actions: ViewActions): ViewHost {
         render(info);
       }
     },
-    tick(nowMs: number) {
+    tick() {
       if (!holding || friction.type !== "hold") return;
-      const p = Math.min(1, (nowMs - holdStart) / friction.ms);
+      // performance.now(), not the frame timestamp: holdStart came from it, and the
+      // two clocks can disagree by a frame or more.
+      const p = Math.max(0, Math.min(1, (performance.now() - holdStart) / friction.ms));
       holdFill.style.transform = `scaleX(${p})`;
       holdTime.textContent = `${Math.max(0, (friction.ms * (1 - p)) / 1000).toFixed(1)}s`;
       if (p >= 1 && !holdDone) {
