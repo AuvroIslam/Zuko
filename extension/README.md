@@ -129,7 +129,7 @@ page (MAIN world)  net-guard.js ──MessageChannel──▶ content.js (isolat
 * TypeScript is erasable-syntax only (`erasableSyntaxOnly`), so Node runs `src/**/*.ts` directly in tests.
 * `scripts/gen-key.mjs` creates the manifest key and keeps the private key in `.keys/` (git-ignored).
   Never commit it. `--force` replaces the key (the ID changes: re-run `register-host.mjs`).
-* `scripts/gen-icons.mjs` redraws the toolbar icons (same shield-and-visor character as the app icon).
+* `scripts/gen-icons.mjs` redraws the toolbar icons (the chibi Zuko head, ported from `app/scripts/gen-icons.mjs`).
 
 ## Credits
 
@@ -137,3 +137,9 @@ Approach informed by two open-source projects (ideas only, no code copied): Reda
 running a Rust/WASM engine in an MV3 extension and for tolerant placeholder matching; and Better-DeepSeek
 (MIT, EdgeTypE), for patching `fetch`/XHR in the page's own world. pdf.js (Apache-2.0) is bundled for PDF
 text extraction.
+
+## Fan tribute
+
+Zuko's on-screen character is an unofficial fan tribute to Prince Zuko from Avatar:
+The Last Airbender (© Viacom International / Nickelodeon); Zuko the app is not
+affiliated with or endorsed by them.

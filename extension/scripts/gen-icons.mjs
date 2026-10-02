@@ -4,7 +4,7 @@
 // right), and the black topknot in its red hair-tie, all inside a dark outline
 // so it reads on light and dark taskbars alike. Small sizes drop detail and
 // chunk up the hair and eyes. No dependencies: the icons are rasterised here
-// and encoded with node:zlib, so the app icon stays "drawn in code" like the
+// and encoded with node:zlib, so the icons stay "drawn in code" like the
 // character itself (src/character/engine.ts).
 //
 //   node scripts/gen-icons.mjs
