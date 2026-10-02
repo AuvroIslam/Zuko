@@ -313,7 +313,8 @@ fn rotated_files(active: &Path) -> Vec<PathBuf> {
 fn item_from_receipt(r: &Receipt) -> ActivityItem {
     ActivityItem {
         id: format!("audit-{}", r.seq),
-        ts: r.ts.saturating_mul(1000),
+        // Receipt timestamps are unix seconds; tolerate a writer that used milliseconds.
+        ts: if r.ts > 100_000_000_000 { r.ts } else { r.ts.saturating_mul(1000) },
         session_id: r.session_id.clone(),
         project: String::new(),
         event: r.event.clone(),

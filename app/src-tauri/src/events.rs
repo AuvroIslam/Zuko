@@ -101,15 +101,19 @@ pub struct PrivacyNote<'a> {
 pub fn announce_privacy(app: &AppHandle, engine: &Engine, note: PrivacyNote) {
     let det = engine.detector();
     let ctx = MaskCtx { source: note.source.to_string(), now: engine::now() };
-    let (summary, labels) = engine.with_vault(|vault| {
-        let summary = mask::mask_text(&det, vault, &note.summary, &ctx).0;
+    let (summary, labels, learned) = engine.with_vault(|vault| {
+        let (summary, report) = mask::mask_text(&det, vault, &note.summary, &ctx);
         let labels: Vec<String> = note
             .keys
             .iter()
             .map(|k| vault.get(k).map(|e| e.label.clone()).unwrap_or_default())
             .collect();
-        (summary, labels)
+        (summary, labels, report.count > 0)
     });
+    if learned {
+        // The summary itself held a value (a file name, a window title): it is in the vault now.
+        engine.persist_vault();
+    }
     if note.direction == "masked" {
         engine::Stats::add(&engine.stats.masked, note.count as u64);
     }
