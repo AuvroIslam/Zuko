@@ -145,7 +145,8 @@ async fn handle(shared: Arc<Shared>, peer: SocketAddr, req: Request<Incoming>) -
     let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
     let upstream = shared.upstream();
     let url = format!("{}{path}{query}", upstream.trim_end_matches('/'));
-    let label = format!("{} {path}{query}", req.method());
+    let shown = if path.is_empty() { "/" } else { path.as_str() };
+    let label = format!("{} {shown}{query}", req.method());
     match route {
         Some(route) => masked(shared, req, route, url, upstream, label).await,
         None => passthrough(shared, req, url, upstream, label).await,
