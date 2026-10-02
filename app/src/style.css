@@ -88,6 +88,33 @@ body {
   pointer-events: none;
 }
 
+/* Zuko's fire: fireballs, bursts and fist flames that fly beyond his own
+   canvas. Covers the window, never takes a click. */
+#fx-canvas {
+  position: fixed;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* Whatever a fireball just hit glows like a hot coal for a moment. */
+.scorched {
+  animation: scorch 0.9s ease-out;
+}
+
+@keyframes scorch {
+  0% {
+    filter: drop-shadow(0 0 0 rgba(242, 138, 30, 0)) brightness(1);
+  }
+  18% {
+    filter: drop-shadow(0 0 6px rgba(242, 138, 30, 0.95)) brightness(1.35) sepia(0.6) saturate(2.2) hue-rotate(-12deg);
+  }
+  100% {
+    filter: drop-shadow(0 0 0 rgba(242, 138, 30, 0)) brightness(1);
+  }
+}
+
 /* The drop sequence. Sits under the header and takes over the island body; it
    cross-fades in and out, so the last frame stays up while the views return. */
 #upload-layer {

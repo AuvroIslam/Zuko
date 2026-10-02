@@ -435,8 +435,57 @@ function session() {
   });
 }
 
+/**
+ * Fire scenes play their effect live; with `&still=1` (or an explicit
+ * `&fxat=<s>`) the fire is frozen `at` seconds in, after `afterMs`, so a
+ * headless screenshot catches it mid-flight.
+ */
+function freezeFire(island: Island, at: number, afterMs: number) {
+  const q = new URLSearchParams(window.location.search);
+  const v = q.get("fxat");
+  if (v == null && !q.has("still")) return;
+  window.setTimeout(() => island.freezeFx(v != null ? Number(v) : at), afterMs);
+}
+
+function working() {
+  const base = { session_id: "s-7f3a", cwd: "C:\\dev\\shop-api" };
+  emit("hook", { ...base, hook_event_name: "SessionStart" });
+  emit("hook", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Add Stripe checkout to the cart page" });
+  emit("hook", { ...base, hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "src/routes/cart.ts" } });
+}
+
 /** `?mock=1&scene=<name>` on index.html. */
 const SCENES: Record<string, (island: Island) => void> = {
+  // A firewall block: Zuko fire-punches the blocked ticker line.
+  "fire-block": (island) => {
+    State.isPinned = true;
+    island.alert("overview");
+    window.setTimeout(() => session(), 150);
+    freezeFire(island, 0.4, 900);
+  },
+  // A masked secret: a flick of flame at the privacy notice.
+  "fire-flick": (island) => {
+    privacy({});
+    freezeFire(island, 0.36, 1200);
+  },
+  // Triple-click on Zuko: a fire punch towards the click.
+  "fire-click": (island) => {
+    State.isPinned = true;
+    island.alert("overview");
+    window.setTimeout(() => {
+      State.mouse = { x: State.mouse.x, y: State.mouse.y };
+      const r = document.getElementById("bot-canvas")?.getBoundingClientRect();
+      if (r) State.mouse = { x: r.left + r.width * 0.75, y: r.top + r.height * 0.62 };
+      island.fireAtCursor();
+    }, 400);
+    freezeFire(island, 0.34, 900);
+  },
+  // An agent at work: Zuko hovers on his ring of fire.
+  "fire-ring": (island) => {
+    State.isPinned = true;
+    working();
+    island.alert("overview");
+  },
   overview: (island) => {
     State.isPinned = true;
     island.alert("overview");
