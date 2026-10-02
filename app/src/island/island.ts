@@ -90,6 +90,9 @@ export class Island {
   private uploadTens = 0;
   private uploadDone = false;
 
+  /** A privacy notice arrived while an approval card was up. */
+  private privacyDeferred = false;
+
   constructor(root: HTMLElement) {
     this.root = root;
     this.build();
@@ -359,16 +362,20 @@ export class Island {
       return;
     }
     // A privacy notice that arrived behind the card gets its turn now.
-    if (State.privacyNotice) {
-      this.setView("privacy");
+    if (this.privacyDeferred && State.privacyNotice) {
+      this.privacyDeferred = false;
+      this.showPrivacy();
       return;
     }
     this.setView(State.defaultView());
   }
 
-  /** Shows the privacy notice, unless an approval card holds the island. */
+  /** Shows the privacy notice, or queues it behind the approval card. */
   showPrivacy() {
-    if (State.pendingApproval) return;
+    if (State.pendingApproval) {
+      this.privacyDeferred = true;
+      return;
+    }
     const blocked = State.privacyNotice?.direction === "blocked_prompt";
     // A blocked prompt waits for its Copy click; a masking notice closes itself.
     State.isPinned = blocked;

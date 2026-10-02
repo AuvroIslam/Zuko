@@ -164,12 +164,31 @@ export async function seedZukoState() {
   if (recent) State.seedActivity(recent);
 }
 
+/** The last notice put on screen, to keep a busy gateway from re-alerting. */
+let lastNotice = { sig: "", at: 0 };
+const NOTICE_REPEAT_MS = 60_000;
+
 function handlePrivacy(island: Island, event: PrivacyEvent) {
   if (State.paused) return;
-  // Restores are routine and happen on every answer in gateway mode: badge only.
-  const pill = event.source === "browser" ? BROWSER_ID : event.source === "gateway" ? GATEWAY_ID : CLAUDE_ID;
+  // Restores are routine and happen on every answer in gateway mode.
   if (event.direction === "rehydrated") return;
-  if (State.focusId !== pill) State.setPillBadge(pill, "masked");
+  const pill = event.source === "browser" ? BROWSER_ID
+    : event.source === "gateway" ? GATEWAY_ID
+      : event.source === "hook" ? CLAUDE_ID : null;
+  if (pill && State.focusId !== pill) State.setPillBadge(pill, "masked");
+
+  // The gateway re-masks the whole history on every turn: the same values a
+  // minute later are a badge, not a new notice. New values and blocked prompts
+  // always get one.
+  const sig = `${event.direction}|${[...event.keys].sort().join(",")}`;
+  const now = Date.now();
+  const repeat = event.direction === "masked" && event.newKeys.length === 0 &&
+    sig === lastNotice.sig && now - lastNotice.at < NOTICE_REPEAT_MS;
+  if (repeat) {
+    State.notify();
+    return;
+  }
+  lastNotice = { sig, at: now };
   State.privacyNotice = event;
   Sound.play(event.direction === "blocked_prompt" ? "error" : "blip");
   island.showPrivacy();
