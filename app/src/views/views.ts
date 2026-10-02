@@ -1,16 +1,20 @@
 // Island views — DOM ports of IslandViewContent.swift. Paddings, font sizes,
 // colours and wording are copied from the Swift views so both platforms read
-// identically.
+// identically. Zuko's own views live next door: approval.ts (the risk card),
+// activity.ts (feed + privacy notice) and surfaces.ts (protection cards).
 
 import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { Ticker } from "./ticker";
-import { State, type AgentTask } from "../core/state";
-import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
+import { agentWho, btn, card, stack } from "./parts";
+import { buildApproval } from "./approval";
+import { buildActivity, buildPrivacy } from "./activity";
+import { renderSurfaceCard, surfaceCardKey } from "./surfaces";
+import { CLAUDE_ID, CLAUDE_NAME, State, type AgentTask, type PillBadge } from "../core/state";
+import type { IslandViewName } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../character/minibots";
 import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
-import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -20,7 +24,12 @@ export interface ViewActions {
   /** The ↗ button: opens whatever the focused pill points at. */
   openTarget(): void;
   openUrl(url: string): void;
-  decide(d: "allow" | "deny"): void;
+  /** Answers the pending approval; `elapsedMs` is how long the card was on screen. */
+  decide(d: "allow" | "deny", elapsedMs: number): void;
+  /** Wakes the frame loop (a view animating from its own tick). */
+  keepAlive(): void;
+  /** Closes the privacy notice. */
+  dismissPrivacy(): void;
   toggleSound(): void;
   setVolume(v: number): void;
   setAutoClose(seconds: number): void;
@@ -35,50 +44,15 @@ export interface ViewHost {
   focus?(): void;
   /** Called every frame while the view is on screen. */
   tick?(nowMs: number): void;
-}
-
-// ── Shared pieces ─────────────────────────────────────────────────────────────
-
-function card(wash: Wash, ...children: (Node | string)[]): HTMLElement {
-  const el = h("div", { class: wash ? "card wash" : "card" }, ...children);
-  if (wash) el.style.setProperty("--wash", washRGBA(wash));
-  return el;
-}
-
-function btn(
-  label: string,
-  kind: "primary" | "secondary",
-  onClick: () => void,
-  kbd?: string,
-): HTMLElement {
-  return h(
-    "button",
-    { class: `btn ${kind}`, onclick: onClick },
-    h("span", { text: label }),
-    kbd ? h("span", { class: "kbd", text: kbd }) : null,
-  );
-}
-
-/** AgentWho — coloured dot + task name + grey label. */
-function agentWho(task: AgentTask | null, label: string): HTMLElement {
-  const row = h("div", { class: "who-row" });
-  if (task) {
-    row.append(dot(task.color, 8), h("span", { class: "n", text: task.name }));
-  }
-  row.append(h("span", { text: label }));
-  return row;
-}
-
-function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElement {
-  const el = h("div", { class: "stack" }, ...children);
-  el.style.padding = `4px ${padRight}px 4px ${padLeft}px`;
-  return el;
+  /** True while tick() has something to animate: keeps the frame loop awake. */
+  animating?(): boolean;
 }
 
 // ── Header ────────────────────────────────────────────────────────────────────
 
 export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, svg(ICONS.house, 13));
+  const tabFeed = h("button", { class: "tab", title: "Activity", onclick: () => go("activity") }, svg(ICONS.list, 13));
   const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
   const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
 
@@ -93,22 +67,32 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabChat, tabDrop),
+    h("div", { class: "tabs" }, tabHome, tabFeed, tabChat, tabDrop),
     h("div", { class: "header-actions" }, gearBtn, soundBtn),
   );
+
+  let gearFilled: boolean | null = null;
+  let soundOn: boolean | null = null;
 
   return {
     el,
     sync() {
       const v = State.view;
       tabHome.classList.toggle("on", v === "overview" || v === "empty");
+      tabFeed.classList.toggle("on", v === "activity");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
       gearBtn.classList.toggle("on", v === "settings");
-      clear(gearBtn);
-      gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
-      clear(soundBtn);
-      soundBtn.append(svg(State.settings.soundEnabled ? ICONS.speakerOn : ICONS.speakerOff, 14));
+      if (gearFilled !== (v === "settings")) {
+        gearFilled = v === "settings";
+        clear(gearBtn);
+        gearBtn.append(svg(gearFilled ? ICONS.gearFill : ICONS.gear, 14));
+      }
+      if (soundOn !== State.settings.soundEnabled) {
+        soundOn = State.settings.soundEnabled;
+        clear(soundBtn);
+        soundBtn.append(svg(soundOn ? ICONS.speakerOn : ICONS.speakerOff, 14));
+      }
       el.style.opacity = v === "confused" ? "0" : "1";
     },
   };
@@ -135,28 +119,10 @@ function buildOverview(actions: ViewActions): ViewHost {
     h("div", { class: "right" }, right),
   );
 
-  let pillIds = "";
-  let detailOpen = false;
+  let pillKey = "";
   let lastFocus: string | null = null;
   let mode: "ticker" | "card" | null = null;
   let cardKey = "";
-
-  const hooks: IntegrationCardHooks = {
-    get detailOpen() {
-      return detailOpen;
-    },
-    openDetail() {
-      detailOpen = true;
-      cardKey = "";
-      State.notify();
-    },
-    closeDetail() {
-      detailOpen = false;
-      cardKey = "";
-      State.notify();
-    },
-    openSettings: () => actions.openSettingsWindow(),
-  };
 
   return {
     el,
@@ -167,15 +133,15 @@ function buildOverview(actions: ViewActions): ViewHost {
       const task = State.focusTask;
       if (task?.id !== lastFocus) {
         lastFocus = task?.id ?? null;
-        detailOpen = false;
         cardKey = "";
         mode = null;
       }
 
-      // VS Code with a live Claude Code session keeps the ticker; every other
-      // pill shows its own card, exactly like IntegrationCardView.
+      // A live Claude Code session (or agent) keeps the ticker; a resting
+      // surface shows its protection card.
+      const live = !!task && !task.isSurface && task.steps.length > 0;
       const sessionActive =
-        task?.id === "integration_claude" && (task.state !== "idle" || task.steps.length > 0);
+        live || (task?.id === CLAUDE_ID && (task.state !== "idle" || task.steps.length > 0));
 
       if (task && sessionActive) {
         if (mode !== "ticker") {
@@ -188,7 +154,7 @@ function buildOverview(actions: ViewActions): ViewHost {
         who.append(
           dot(task.color, 7),
           h("span", { class: "name", text: task.name }),
-          h("span", { class: "tool", text: task.source === "claudeCode" ? "Claude Code" : "n8n" }),
+          h("span", { class: "tool", text: task.source === "agent" ? "Agent" : CLAUDE_NAME }),
         );
         if (task.steps.length > 1) {
           who.append(h("span", {
@@ -198,26 +164,21 @@ function buildOverview(actions: ViewActions): ViewHost {
         }
         ticker.sync(task);
       } else if (task) {
-        const info = State.integrations[task.id];
-        const key = [
-          task.id, detailOpen, task.state, task.steps.join("|"),
-          info?.loaded, info?.error, info?.configured,
-          JSON.stringify(info?.data ?? {}),
-        ].join("~");
+        const key = surfaceCardKey(task);
         if (key !== cardKey) {
           cardKey = key;
           mode = "card";
           clear(leftBody);
-          leftBody.append(renderIntegrationCard(task, hooks));
+          leftBody.append(renderSurfaceCard(task, actions));
         }
       }
 
-      jump.style.display = detailOpen ? "none" : "";
-
       const others = State.otherTasks.slice(0, 4);
-      const pillKey = others.map((t) => `${t.id}:${t.pillBadge ?? ""}`).join("|");
-      if (pillKey !== pillIds) {
-        pillIds = pillKey;
+      const key = others
+        .map((t) => `${t.id}:${t.pillBadge ?? ""}:${t.pillMeta ?? ""}:${t.pillTitle ?? ""}`)
+        .join("|");
+      if (key !== pillKey) {
+        pillKey = key;
         clear(pills);
         for (const t of others) pills.append(buildPill(t, actions));
         pruneMiniBots();
@@ -226,35 +187,57 @@ function buildOverview(actions: ViewActions): ViewHost {
   };
 }
 
+const BADGE_COLORS: Record<PillBadge, string> = {
+  approval: "#F5A524",
+  finished: "#22C55E",
+  error: "#F4505E",
+  denied: "#F4505E",
+  masked: "#2DD4BF",
+};
+
+const BADGE_ICONS: Record<PillBadge, { path: string; stroke: number }> = {
+  approval: { path: ICONS.bang, stroke: 0 },
+  finished: { path: ICONS.check, stroke: 3 },
+  error: { path: ICONS.xmark, stroke: 0 },
+  denied: { path: ICONS.xmark, stroke: 0 },
+  masked: { path: ICONS.lock, stroke: 0 },
+};
+
 function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
-  const label = task.id === "integration_claude" ? "VS Code" : task.name;
+  const label = task.id === CLAUDE_ID ? CLAUDE_NAME : task.name;
   const canvas = createMiniBot(task, 24);
+  const lbl = h("span", { class: "lbl", text: label });
   const pill = h(
     "div",
-    { class: "pill", onclick: () => actions.setFocus(task.id) },
+    { class: "pill", title: task.pillTitle ?? label, onclick: () => actions.setFocus(task.id) },
     canvas,
-    h("span", { class: "lbl", text: label }),
+    lbl,
   );
+  if (task.pillMeta) {
+    const off = task.pillMeta === "off" || task.pillMeta === "down";
+    pill.append(h("span", { class: off ? "pill-meta off" : "pill-meta", text: task.pillMeta }));
+    pill.classList.add("has-meta");
+  }
   pill.style.borderColor = `${task.color}24`;
   pill.addEventListener("mouseenter", () => {
     pill.style.background = `${task.color}2e`;
     pill.style.borderColor = `${task.color}8c`;
     pill.style.boxShadow = `0 2px 10px ${task.color}59`;
-    (pill.querySelector(".lbl") as HTMLElement).style.color = lighten(task.color, 0.3);
+    lbl.style.color = lighten(task.color, 0.3);
   });
   pill.addEventListener("mouseleave", () => {
     pill.style.background = "";
     pill.style.borderColor = `${task.color}24`;
     pill.style.boxShadow = "";
-    (pill.querySelector(".lbl") as HTMLElement).style.color = "";
+    lbl.style.color = "";
   });
 
   if (task.pillBadge) {
-    const colors = { approval: "#F5A524", finished: "#22C55E", error: "#F4505E" } as const;
-    const icons = { approval: ICONS.bang, finished: ICONS.check, error: ICONS.xmark } as const;
-    const inner = h("i", { style: `background:${colors[task.pillBadge]}` }, svg(icons[task.pillBadge], 6, { stroke: task.pillBadge === "finished" ? 3 : 0 }));
+    const color = BADGE_COLORS[task.pillBadge];
+    const icon = BADGE_ICONS[task.pillBadge];
+    const inner = h("i", { style: `background:${color}` }, svg(icon.path, 6, { stroke: icon.stroke }));
     const badge = h("div", { class: "pill-badge" }, inner);
-    badge.style.boxShadow = `0 0 4px ${colors[task.pillBadge]}99`;
+    badge.style.boxShadow = `0 0 4px ${color}99`;
     pill.append(badge);
   }
   return pill;
@@ -278,7 +261,7 @@ function buildEmpty(actions: ViewActions): ViewHost {
       "div",
       { style: "display:flex;flex-direction:column;gap:5px" },
       h("div", { class: "title", text: "Nothing running right now." }),
-      h("div", { class: "sub", text: "Drop a file or window, or ask me anything." }),
+      h("div", { class: "sub", text: "Drop a file to sanitize it, or ask me anything." }),
     ),
     h("div", { class: "grow" }),
     btn("Ask Claude", "primary", () => actions.setView("prompt")),
@@ -286,53 +269,20 @@ function buildEmpty(actions: ViewActions): ViewHost {
   return { el: h("div", { class: "view" }, card(null, body)), sync() {} };
 }
 
-// ── Approval ──────────────────────────────────────────────────────────────────
-
-function buildApproval(actions: ViewActions): ViewHost {
-  const who = h("div");
-  const code = h("div", { class: "code" });
-  const row = h("div", { class: "actions" });
-  const el = h("div", { class: "view" }, card("amber", stack(116, 16, who, code, row)));
-  let rowKey = "";
-  return {
-    el,
-    sync() {
-      clear(who);
-      who.append(agentWho(State.focusTask, "needs permission"));
-      // The whole point of approving here rather than in the terminal: this line
-      // is the command, the file path or the URL being authorised, not just the
-      // name of the tool asking.
-      code.textContent = State.pendingApproval?.command || State.pendingApproval?.tool || "…";
-      // Two buttons, built once. Rebuilding them between a mouse-down and a
-      // mouse-up would swallow the click, and there is nothing left to vary:
-      // "Always" is gone until the remembered-rules list exists to back it.
-      if (rowKey === "built") return;
-      rowKey = "built";
-      clear(row);
-      row.append(
-        btn("Deny", "secondary", () => actions.decide("deny"), "N"),
-        btn("Allow", "primary", () => actions.decide("allow"), "Y"),
-      );
-    },
-  };
-}
-
 // ── Question ──────────────────────────────────────────────────────────────────
 
 function buildQuestion(): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title" });
-  const row = h("div", { class: "actions" });
+  const row = h("div", { class: "actions" },
+    h("div", { class: "sub", text: "Answer in your terminal — Zuko can't reply for you." }));
   const el = h("div", { class: "view" }, card("cyan", stack(116, 16, who, title, row)));
   return {
     el,
     sync() {
       clear(who);
       who.append(agentWho(State.focusTask, "Claude Code is asking a question"));
-      const task = State.focusTask;
-      title.textContent = task?.steps.at(-1) ?? "Claude needs an answer.";
-      clear(row);
-      row.append(h("div", { class: "sub", text: "Answer in your terminal — Zuko can't reply for you yet." }));
+      title.textContent = State.focusTask?.steps.at(-1) ?? "Claude needs an answer.";
     },
   };
 }
@@ -341,11 +291,11 @@ function buildQuestion(): ViewHost {
 
 function buildError(actions: ViewActions): ViewHost {
   const who = h("div");
-  const title = h("div", { class: "title", text: "Workflow stopped." });
+  const title = h("div", { class: "title", text: "Session stopped on an error." });
   const detail = h("div", { class: "detail" });
   const row = h("div", { class: "actions" },
-    btn("Retry", "primary", () => actions.setView(State.defaultView())),
-    btn("Open in n8n", "secondary", () => actions.openUrl("")),
+    btn("Open terminal", "primary", () => actions.openTerminal()),
+    btn("OK", "secondary", () => actions.setView(State.defaultView())),
   );
   const el = h("div", { class: "view" }, card("red", stack(116, 16, who, title, detail, row)));
   return {
@@ -353,8 +303,7 @@ function buildError(actions: ViewActions): ViewHost {
     sync() {
       const task = State.focusTask;
       clear(who);
-      who.append(agentWho(task, task?.source === "n8n" ? "n8n" : "Claude Code"));
-      title.textContent = task?.source === "n8n" ? "Workflow stopped." : "Session stopped on an error.";
+      who.append(agentWho(task, task?.source === "agent" ? "Agent" : CLAUDE_NAME));
       detail.textContent = task?.steps.at(-1) ?? "No detail available.";
     },
   };
@@ -387,7 +336,7 @@ function buildConfused(): ViewHost {
     "div",
     { class: "stack", style: "padding:0 18px 0 128px" },
     h("div", { class: "title", text: "Too many hits at once." }),
-    h("div", { class: "sub", text: "Give me a sec — back to work in three seconds." }),
+    h("div", { class: "sub", text: "Give me a sec — back on watch in three seconds." }),
   );
   return { el: h("div", { class: "view" }, card("pink", body)), sync() {} };
 }
@@ -395,8 +344,8 @@ function buildConfused(): ViewHost {
 // ── Note ──────────────────────────────────────────────────────────────────────
 
 function buildNote(): ViewHost {
-  const title = h("div", { class: "title" });
-  const el = h("div", { class: "view" }, card(null, h("div", { class: "stack", style: "padding:0 18px 0 98px" }, title)));
+  const title = h("div", { class: "title note-text" });
+  const el = h("div", { class: "view" }, card(null, h("div", { class: "stack", style: "padding:0 22px 0 108px" }, title)));
   return {
     el,
     sync() {
@@ -417,8 +366,9 @@ function buildSettings(actions: ViewActions): ViewHost {
   const segButtons = [10, 15, 30].map((s) =>
     h("button", { onclick: () => actions.setAutoClose(s) }, `${s}s`),
   );
-  const claudeBadge = h("span", { class: "status-badge" });
-  const apiBadge = h("span", { class: "status-badge" });
+  const hooksBadge = h("span", { class: "status-badge" });
+  const gatewayBadge = h("span", { class: "status-badge" });
+  const modeBadge = h("span", { class: "status-badge" });
 
   const rows = h(
     "div",
@@ -434,8 +384,9 @@ function buildSettings(actions: ViewActions): ViewHost {
     h(
       "div",
       { class: "settings-row", style: "gap:14px" },
-      claudeBadge,
-      apiBadge,
+      hooksBadge,
+      gatewayBadge,
+      modeBadge,
       h("div", { class: "grow" }),
       h("button", {
         class: "link-btn",
@@ -453,23 +404,28 @@ function buildSettings(actions: ViewActions): ViewHost {
     el,
     sync() {
       const s = State.settings;
+      const p = State.protection;
       soundSwitch.classList.toggle("on", s.soundEnabled);
       volume.value = String(s.soundVolume);
       volume.style.opacity = s.soundEnabled ? "1" : "0.4";
       autoLabel.textContent = `Auto-close · ${Math.round(s.autoCloseInterval)}s`;
       segButtons.forEach((b, i) => b.classList.toggle("on", s.autoCloseInterval === [10, 15, 30][i]));
-      clear(claudeBadge);
-      claudeBadge.append(
-        dot(s.hooksInstalled ? "#22C55E" : "#F4505E", 6),
-        h("span", { text: "Claude Code" }),
+      const hooks = p?.hooksInstalled ?? s.hooksInstalled;
+      clear(hooksBadge);
+      hooksBadge.append(dot(hooks ? "#22C55E" : "#F4505E", 6), h("span", { text: "Hooks" }));
+      clear(gatewayBadge);
+      gatewayBadge.append(
+        dot(!p?.gatewayConfigured ? "#5F646D" : p.gatewayRunning ? "#22C55E" : "#F4505E", 6),
+        h("span", { text: "Gateway" }),
       );
-      clear(apiBadge);
-      apiBadge.append(dot("#F4505E", 6), h("span", { text: "API" }));
+      clear(modeBadge);
+      const monitor = p?.mode === "monitor";
+      modeBadge.append(dot(monitor ? "#F5A524" : "#22C55E", 6), h("span", { text: monitor ? "Monitor" : "Enforce" }));
     },
   };
 }
 
-// ── Placeholders filled in later stages ───────────────────────────────────────
+// ── Placeholders ──────────────────────────────────────────────────────────────
 
 function buildPlaceholder(title: string, sub: string): ViewHost {
   const body = h(
@@ -497,6 +453,8 @@ export function buildViews(
   map.set("confused", buildConfused());
   map.set("note", buildNote());
   map.set("settings", buildSettings(actions));
+  map.set("activity", buildActivity(actions));
+  map.set("privacy", buildPrivacy(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());

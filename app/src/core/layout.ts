@@ -21,7 +21,9 @@ export type IslandViewName =
   | "result"
   | "note"
   | "settings"
-  | "greeting";
+  | "greeting"
+  | "activity"
+  | "privacy";
 
 export type BotStateName =
   | "idle"
@@ -69,6 +71,7 @@ export const WAKE_STRIP_H = 6;
 export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   overview: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "pills" },
   empty: { height: 160, botX: 70, botY: null, botDiameter: 62, agentMode: "none" },
+  // Without a risk verdict; with one the height comes from approvalHeight().
   approval: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },
   question: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },
   error: { height: 160, botX: 62, botY: null, botDiameter: 58, agentMode: "column" },
@@ -86,7 +89,21 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   note: { height: 160, botX: 60, botY: null, botDiameter: 50, agentMode: "column" },
   settings: { height: 160, botX: 54, botY: null, botDiameter: 46, agentMode: "none" },
   greeting: { height: 150, botX: 320, botY: 90, botDiameter: 0, agentMode: "none" },
+  // The feed is a list: Zuko keeps watch from the top-left corner instead of the
+  // vertical centre.
+  activity: { height: 284, botX: 52, botY: 90, botDiameter: 44, agentMode: "none" },
+  privacy: { height: 206, botX: 62, botY: null, botDiameter: 54, agentMode: "column" },
 };
+
+/**
+ * The approval card with a risk verdict: who, headline, target, impact chips and
+ * buttons (210), plus 22 per optional line — the factor sentences and the note.
+ * `lines` null means no verdict, so the plain card.
+ */
+export function approvalHeight(lines: number | null): number {
+  if (lines == null) return VIEW_LAYOUTS.approval.height;
+  return Math.min(PANEL_H - 12, 210 + 22 * Math.max(0, lines));
+}
 
 // The upload views above are only the fallback geometry. Once a file is actually
 // dropped the whole sequence — Zuko included — is drawn by src/upload, which
@@ -97,10 +114,17 @@ export function chatPromptHeight(messageCount: number): number {
   return Math.min(300, 240 + messageCount * 40);
 }
 
+/** View-dependent inputs to the island height. */
+export interface SizeExtras {
+  chatCount?: number;
+  /** See approvalHeight. */
+  approvalLines?: number | null;
+}
+
 export function islandSize(
   mode: IslandMode,
   view: IslandViewName,
-  chatCount = 0,
+  extras: SizeExtras = {},
 ): { w: number; h: number } {
   switch (mode) {
     case "hidden":
@@ -110,7 +134,12 @@ export function islandSize(
     case "compact":
       return { w: COMPACT_W, h: NOTCH_H };
     case "expanded": {
-      const h = view === "prompt" ? chatPromptHeight(chatCount) : VIEW_LAYOUTS[view].height;
+      const h =
+        view === "prompt"
+          ? chatPromptHeight(extras.chatCount ?? 0)
+          : view === "approval"
+            ? approvalHeight(extras.approvalLines ?? null)
+            : VIEW_LAYOUTS[view].height;
       return { w: EXPANDED_W, h };
     }
   }
@@ -205,6 +234,37 @@ export function colorForProject(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
   return FALLBACK_COLORS[Math.abs(hash) % FALLBACK_COLORS.length];
+}
+
+// ── Risk tiers ────────────────────────────────────────────────────────────────
+
+export type TierName = "low" | "medium" | "high" | "critical";
+
+/** Tier → accent colour: low green, medium amber, high and critical red. */
+export function tierColor(tier: TierName): string {
+  switch (tier) {
+    case "low":
+      return "#34D399";
+    case "medium":
+      return "#F5A524";
+    case "high":
+      return "#FF6B6B";
+    case "critical":
+      return "#F4505E";
+  }
+}
+
+/** Tier → card wash. A request without a verdict keeps the classic amber. */
+export function tierWash(tier: TierName | null): Wash {
+  switch (tier) {
+    case "low":
+      return "green";
+    case "high":
+    case "critical":
+      return "red";
+    default:
+      return "amber";
+  }
 }
 
 // Card wash colours (CardBackground.washColor)
