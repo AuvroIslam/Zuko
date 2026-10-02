@@ -1,6 +1,7 @@
 //! Vault + masking + rehydration properties.
 
 use serde_json::json;
+use std::sync::LazyLock;
 use zuko_core::detect::{Category, Detector, DetectorConfig, Finding};
 use zuko_core::mask::{
     find_placeholders, keys_in_json, keys_in_text, legend, mask_json, mask_known, mask_known_json, mask_text,
@@ -9,7 +10,11 @@ use zuko_core::mask::{
 use zuko_core::placeholder;
 use zuko_core::vault::Vault;
 
-const POSITIVE: &str = include_str!("fixtures/detect_positive.txt");
+// The fixtures store each fake key "defanged" (a U+00A6 marker after its third
+// character) so secret scanners such as GitHub push protection do not flag them.
+// The text the tests check is the original, with the markers removed.
+static POSITIVE: LazyLock<String> =
+    LazyLock::new(|| include_str!("fixtures/detect_positive.txt").replace('\u{a6}', ""));
 const CLEAN_CODE: &str = include_str!("fixtures/clean_code.txt");
 const MASK_RS: &str = include_str!("../src/mask.rs");
 

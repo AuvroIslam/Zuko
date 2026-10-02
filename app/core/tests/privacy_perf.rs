@@ -3,13 +3,18 @@
 //! are ~10–30× slower); run `cargo test --release -p zuko-core --test privacy_perf --
 //! --nocapture` to see the real numbers.
 
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use zuko_core::detect::{Detector, DetectorConfig};
 use zuko_core::mask::{mask_text, MaskCtx};
 use zuko_core::vault::Vault;
 
 const CLEAN_CODE: &str = include_str!("fixtures/clean_code.txt");
-const POSITIVE: &str = include_str!("fixtures/detect_positive.txt");
+// The fixtures store each fake key "defanged" (a U+00A6 marker after its third
+// character) so secret scanners such as GitHub push protection do not flag them.
+// The text the tests check is the original, with the markers removed.
+static POSITIVE: LazyLock<String> =
+    LazyLock::new(|| include_str!("fixtures/detect_positive.txt").replace('\u{a6}', ""));
 
 fn corpus(min_len: usize) -> String {
     let secrets: String = POSITIVE

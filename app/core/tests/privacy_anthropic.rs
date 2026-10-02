@@ -1,12 +1,17 @@
 //! Messages API request masking and response rehydration (JSON and SSE).
 
 use serde_json::{json, Value};
+use std::sync::LazyLock;
 use zuko_core::anthropic::{mask_request, rehydrate_response, RequestOutcome, SinkPolicy, SseRehydrator};
 use zuko_core::detect::{Category, Detector, DetectorConfig, Finding};
 use zuko_core::mask::{legend, rehydrate_json, rehydrate_text, MaskCtx};
 use zuko_core::vault::Vault;
 
-const REQUEST: &str = include_str!("fixtures/anthropic_request.json");
+// The fixtures store each fake key "defanged" (a U+00A6 marker after its third
+// character) so secret scanners such as GitHub push protection do not flag them.
+// The text the tests check is the original, with the markers removed.
+static REQUEST: LazyLock<String> =
+    LazyLock::new(|| include_str!("fixtures/anthropic_request.json").replace('\u{a6}', ""));
 const STREAM: &str = include_str!("fixtures/anthropic_stream.sse");
 
 const OPENAI: &str = "sk-proj-ZukoFake0123456789abcdefghijklmnopqrstuvwx";
@@ -50,7 +55,7 @@ fn stream_vault() -> Vault {
 
 #[test]
 fn realistic_claude_code_request_is_masked_per_spec() {
-    let original: Value = serde_json::from_str(REQUEST).unwrap();
+    let original: Value = serde_json::from_str(&REQUEST).unwrap();
     let mut body = original.clone();
     let mut vault = Vault::new();
     let out = mask_request(&det(), &mut vault, &mut body, &ctx());

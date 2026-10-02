@@ -1,9 +1,15 @@
 //! Detector recall/precision fixtures and behaviour tests.
 
+use std::sync::LazyLock;
 use zuko_core::detect::{Category, Detector, DetectorConfig, Finding};
 
-const POSITIVE: &str = include_str!("fixtures/detect_positive.txt");
-const NEGATIVE: &str = include_str!("fixtures/detect_negative.txt");
+// The fixtures store each fake key "defanged" (a U+00A6 marker after its third
+// character) so secret scanners such as GitHub push protection do not flag them.
+// The text the tests check is the original, with the markers removed.
+static POSITIVE: LazyLock<String> =
+    LazyLock::new(|| include_str!("fixtures/detect_positive.txt").replace('\u{a6}', ""));
+static NEGATIVE: LazyLock<String> =
+    LazyLock::new(|| include_str!("fixtures/detect_negative.txt").replace('\u{a6}', ""));
 const CLEAN_CODE: &str = include_str!("fixtures/clean_code.txt");
 
 struct Expect {
