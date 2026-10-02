@@ -54,8 +54,8 @@ pub struct SanitizeResult {
     pub warnings: Vec<String>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Kind {
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Kind {
     Text,
     Markdown,
     Code,
@@ -123,9 +123,23 @@ pub fn sanitize_file_report(engine: &Engine, path: &str) -> Result<(SanitizeResu
     sanitize_into(engine, path, &crate::files::inbox_dir())
 }
 
-fn sanitize_into(engine: &Engine, path: &str, inbox: &Path) -> Result<(SanitizeResult, MaskReport), String> {
-    let input = Path::new(path);
-    let meta = std::fs::metadata(input).map_err(|e| format!("Can't open {path}: {e}"))?;
+/// A file reduced to the text Zuko works on.
+pub struct Extracted {
+    pub kind: Kind,
+    /// Lowercase extension (or "env" / "txt" for the special names).
+    pub ext: String,
+    /// The file's own name.
+    pub name: String,
+    /// Text for text kinds; "## Page N" sections for a PDF.
+    pub body: String,
+    pub pages: Option<u32>,
+    pub warnings: Vec<String>,
+}
+
+/// Reads `input` and reduces it to text (see the module doc for what is accepted and
+/// refused). Shared by the sanitizer and the island chat.
+pub fn extract(input: &Path) -> Result<Extracted, String> {
+    let meta = std::fs::metadata(input).map_err(|e| format!("Can't open {}: {e}", input.display()))?;
     if meta.is_dir() {
         return Err("That is a folder. Drop a single file.".into());
     }
@@ -156,6 +170,12 @@ fn sanitize_into(engine: &Engine, path: &str, inbox: &Path) -> Result<(SanitizeR
         }
         text
     };
+    Ok(Extracted { kind, ext, name, body, pages, warnings })
+}
+
+fn sanitize_into(engine: &Engine, path: &str, inbox: &Path) -> Result<(SanitizeResult, MaskReport), String> {
+    let input = Path::new(path);
+    let Extracted { kind, ext, name, body, pages, warnings } = extract(input)?;
 
     // Mask the content and the original name in one pass over the vault.
     let det = engine.detector();
