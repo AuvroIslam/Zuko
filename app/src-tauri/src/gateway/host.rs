@@ -145,6 +145,18 @@ impl Host {
         });
     }
 
+    /// A local-AI deep scan taught the vault new values (keys and labels only).
+    pub fn ai_learned(&self, learned: &crate::localai::Learned, session_id: Option<String>) {
+        if learned.new_keys.is_empty() {
+            return;
+        }
+        self.trace(format!("  local AI learned [{}]", learned.new_keys.join(", ")));
+        self.persist_vault();
+        if let Host::App(app) = self {
+            crate::localai::announce_learned(app, learned, "gateway", session_id);
+        }
+    }
+
     /// Placeholders filled with real values in a response.
     pub fn rehydrated(&self, session_id: Option<String>, keys: &[String]) {
         if keys.is_empty() {

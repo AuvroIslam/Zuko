@@ -749,6 +749,23 @@ code.preview.revealed {
   min-width: 0;
 }
 
+.act-ai {
+  font-size: 12px;
+  color: var(--dim);
+  margin-top: 2px;
+}
+
+.act-ai i {
+  font-style: normal;
+  font-weight: 600;
+  color: #60a5fa;
+  margin-right: 6px;
+}
+
+.localai-test ul {
+  margin: 4px 0 0;
+}
+
 .act-text {
   font-size: 12.5px;
   color: var(--ink);

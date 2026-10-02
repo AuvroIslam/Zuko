@@ -14,6 +14,7 @@ mod firewall;
 mod gateway;
 mod hooks;
 mod island;
+mod localai;
 mod log;
 mod pipe;
 mod platform;
@@ -463,6 +464,8 @@ pub fn run() {
             commands::policy_get,
             commands::policy_set,
             commands::policy_reset,
+            commands::localai_status,
+            commands::localai_test,
             commands::vault_list,
             commands::vault_add,
             commands::vault_forget,
@@ -505,6 +508,7 @@ pub fn run() {
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             gateway::start(handle.clone());
+            localai::warm_up(&handle);
             Ok(())
         })
         .build(tauri::generate_context!())

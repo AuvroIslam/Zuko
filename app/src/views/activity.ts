@@ -40,7 +40,10 @@ function feedRow(item: ActivityItem): HTMLElement {
     : null;
   return h(
     "div",
-    { class: "feed-row", title: `${v.label} · ${text}${where ? `\n${where}` : ""}` },
+    {
+      class: "feed-row",
+      title: `${v.label} · ${text}${where ? `\n${where}` : ""}${item.aiExplanation ? `\nAI explanation: ${item.aiExplanation}` : ""}`,
+    },
     h("i", { class: "feed-icon", style: `color:${v.color}` }, svg(v.icon, 9, v.stroke ? { stroke: 3 } : {})),
     h("span", { class: "feed-text", text }),
     tier,

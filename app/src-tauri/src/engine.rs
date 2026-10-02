@@ -66,6 +66,8 @@ pub struct Engine {
     ledgers: Mutex<HashMap<String, Ledger>>,
     base: CtxBase,
     pub stats: Stats,
+    /// The optional local LLM client (used only when `policy.localAi.enabled`).
+    localai: crate::localai::LocalAi,
 }
 
 // ── Per-project policy ────────────────────────────────────────────────────────
@@ -201,6 +203,7 @@ impl Engine {
             ledgers: Mutex::new(HashMap::new()),
             base,
             stats: Stats::default(),
+            localai: crate::localai::LocalAi::new(),
         }
     }
 
@@ -220,6 +223,11 @@ impl Engine {
         sink: impl Fn(&Vault) + Send + Sync + 'static,
     ) -> Engine {
         Engine::build(policy, vault, base, Some(Box::new(sink)), debounce)
+    }
+
+    /// The local LLM client. Callers read `policy().local_ai` for its settings.
+    pub fn localai(&self) -> &crate::localai::LocalAi {
+        &self.localai
     }
 
     pub fn base(&self) -> &CtxBase {

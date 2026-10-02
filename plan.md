@@ -241,6 +241,47 @@ Evaluation order: **self-protection → deny → taint invariants → ask → ri
 - **Restore:** paste an answer that contains placeholders and Zuko rehydrates it from the vault. Hotkeys mask and unmask the clipboard, so this works with *any* chat app.
 - The built-in chat with Claude always goes through the masker.
 
+### 10b. Local AI (optional, off by default)
+An on-device model in Ollama (default `gemma3:4b` at `http://127.0.0.1:11434`) catches what
+patterns cannot — person names, street addresses, organisation names, internal hostnames
+and tokens with no known format — and explains risky actions in plain English. Config:
+`localAi` in the global policy (`enabled`, `endpoint`, `model`, `deepScanPrompts`,
+`deepScanDocuments`, `explainRisk`, `waitForPromptScan`, `timeoutMs`); a project policy
+cannot change it. Settings → Local AI shows Ollama's status (with the exact
+`ollama pull <model>` when the model is missing), the installed models, and a Test button.
+
+**Core security rule: the LLM may only make Zuko STRICTER, never looser.**
+- Deterministic detection and the guard always run first and stay authoritative. The model
+  can ADD findings to mask (interned into the vault, so the normal `mask_known` /
+  `mask_text` passes mask them everywhere from then on), ADD an ask or raise a tier (pure
+  helpers `stricter_verdict` / `stricter_tier`, monotone by construction) and ADD
+  explanation text. It can never remove a mask, lower a verdict, turn deny/ask into allow,
+  or hold up the fast path. Explanations are display text that no decision reads.
+- Its output is untrusted: strict JSON only; every finding must be an exact substring of
+  the text it was shown (checked in `zuko_core::localai::parse_deep_scan`), kinds come from
+  a fixed list, labels are Zuko's own (a model label could carry the value into the cloud
+  legend), short/odd values are rejected. Garbage, refusals and timeouts are ignored: the
+  deterministic result stands. An explanation that plays the risk down ("this is safe") is
+  discarded.
+- Loopback only: the endpoint must be `127.0.0.1`, `localhost` (pinned to 127.0.0.1) or
+  `[::1]`, checked on save and again on every call; the client ignores proxies and
+  refuses redirects.
+- The model never sees a known secret: deep scans get the text after deterministic masking
+  (on a throwaway vault copy), explanations are built only from vault-masked facts
+  (`ExplainInput::masked` is the only constructor).
+- Bounded: at most 2 calls in flight, a hash-keyed cache, per-call `timeoutMs`.
+
+Where it runs: documents wait (bounded) for a chunked deep scan before the `.zuko.md` is
+written (`SanitizeResult.aiDeepScan`: "AI deep scan: +N items"); the island chat waits for
+the scan of the message; hook `UserPromptSubmit` and the gateway scan the newest user text
+in the background; ask/deny decisions and approval cards get an `ai-explain` event.
+**Limitation:** in background mode the very first send of a new name can leave before its
+scan finishes; every later request masks it. The gateway option "wait for AI scan on
+prompts" closes the gap by holding each prompt up to `timeoutMs`. Measured on the dev
+machine (CPU, gemma3:4b): about 4 s for a repeated prompt, 7–10 s for a new short prompt,
+plus about 11 s the first time the model loads (Zuko pre-loads it when the feature is on),
+so slower machines should raise `timeoutMs` or use a smaller model.
+
 ---
 
 ## 11. Rebrand (required by Coucou's asset license)
@@ -267,6 +308,7 @@ Evaluation order: **self-protection → deny → taint invariants → ask → ri
 | 8 | Browser extension + WASM engine + native host | done (128 tests); still needs a manual check in a real Chrome/Edge on the live sites |
 | 9 | Tests and real end-to-end runs | done (see below) |
 | 10 | Security review and fixes, README | done for the pipe trust boundary (only Zuko's own binaries may talk to the app); further review welcome |
+| 11 | Optional local AI (Ollama): deep scans and risk explanations, stricter-only (§10b) | done: core validators + mock-Ollama app tests; real `gemma3:4b` smoke test passes (`cargo test -p zuko --lib real_gemma -- --ignored`) |
 
 ### Verified end to end (real Claude Code CLI, real app, fake secrets)
 1. **Gateway mode:** a prompt carrying `sk-proj-…` reached the provider as `{{API_KEY_1}}`. The agent wrote `OPENAI_API_KEY={{API_KEY_1}}`, and `.env` on disk got the real key. The audit log shows `Gateway masked [API_KEY_1]`, then `PreToolUse Write allow`.
@@ -288,7 +330,7 @@ Evaluation order: **self-protection → deny → taint invariants → ask → ri
 - **Extension:** unit tests for body rewriters and the tripwire against the WASM engine in Node, then manual checks on the three sites.
 
 ## 14. Honest limitations
-- Detection is pattern-based. Unknown secret formats and free-form names can slip through, and custom terms help. No ML or NER in v1 (a local model is a possible future add-on).
+- Detection is pattern-based. Unknown secret formats and free-form names can slip through, and custom terms help. The optional local AI (§10b) catches many names and addresses, but it is best effort, only ever adds masks, and in background mode can miss the first send of a new value.
 - Shell parsing is best effort. Obfuscated commands are treated as unknown, which means Zuko asks.
 - No OS sandbox on native Windows, so processes the agent starts can do things Zuko never sees.
 - Hooks fail open by Claude Code's design. Gateway mode plus `permissions.deny` rules are the hard floor.

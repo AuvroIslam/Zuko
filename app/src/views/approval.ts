@@ -81,7 +81,8 @@ function noteFor(info: ApprovalInfo, friction: EffectiveFriction): { text: strin
 export function approvalLines(info: ApprovalInfo | null, guard: RubberStampGuard): number | null {
   if (!info?.zuko) return null;
   const friction = effectiveFriction(info, guard);
-  return topFactors(info.zuko).length + (noteFor(info, friction) ? 1 : 0);
+  // The AI explanation is clamped to two lines.
+  return topFactors(info.zuko).length + (noteFor(info, friction) ? 1 : 0) + (info.aiExplanation ? 2 : 0);
 }
 
 /** "DELETES the folder build/" → the leading capitalised verb in the tier colour. */
@@ -102,6 +103,11 @@ export function buildApproval(actions: ViewActions): ViewHost {
   const factors = h("div", { class: "appr-factors" });
   const chips = h("div", { class: "appr-chips" });
   const note = h("div", { class: "appr-note" });
+  // The local AI's plain-English explanation, labelled as such. It arrives after the
+  // card is up and only adds text: the headline, friction and buttons stay Zuko's.
+  const aiText = h("span");
+  const ai = h("div", { class: "appr-ai" }, h("i", { text: "AI explanation" }), aiText);
+  ai.style.display = "none";
 
   // Every button is built once, here. Rebuilding one between a pointer-down and
   // a pointer-up swallows the click, and a hold would lose its press; sync()
@@ -119,7 +125,7 @@ export function buildApproval(actions: ViewActions): ViewHost {
   });
   const row = h("div", { class: "actions" }, deny, allow, hold, h("div", { class: "grow" }), policyLink);
 
-  const body = stack(116, 16, who, headline, code, factors, chips, note, row);
+  const body = stack(116, 16, who, headline, code, factors, ai, chips, note, row);
   body.classList.add("appr");
   const cardEl = card("amber", body);
   const el = h("div", { class: "view" }, cardEl);
@@ -240,6 +246,10 @@ export function buildApproval(actions: ViewActions): ViewHost {
       code.textContent = info?.command || info?.tool || "…";
 
       if (!info) return;
+      const explanation = info.aiExplanation ?? "";
+      if (aiText.textContent !== explanation) aiText.textContent = explanation;
+      ai.title = explanation;
+      ai.style.display = explanation ? "" : "none";
       if (info.requestId !== currentId) {
         currentId = info.requestId;
         // sync() only runs while the view is on screen, so this is the moment the

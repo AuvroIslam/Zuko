@@ -148,6 +148,12 @@ export const Bridge = {
   /** Saves and returns the default policy. */
   policyReset: () => callOrThrow<Policy>("policy_reset"),
 
+  // ── Local AI (optional Ollama on this machine) ────────────────────────────
+  /** Is Ollama reachable, is the model installed. `config`: an unsaved draft. */
+  localaiStatus: (config?: LocalAiConfig) => callOrThrow<LocalAiStatus>("localai_status", { config: config ?? null }),
+  /** Deep-scans a made-up sentence; never touches the vault. */
+  localaiTest: (config?: LocalAiConfig) => callOrThrow<LocalAiTest>("localai_test", { config: config ?? null }),
+
   // ── Vault (values never reach the webview, except through vaultReveal) ───
   vaultList: () => call<EntryView[]>("vault_list"),
   /** Returns the new key (e.g. `API_KEY_3`). */
@@ -289,6 +295,8 @@ export interface ActivityItem {
   rules: string[];
   /** Vault keys involved. */
   keys: string[];
+  /** Local AI explanation (display only), when one arrived for this item. */
+  aiExplanation?: string;
 }
 
 export interface SanitizeFinding {
@@ -311,6 +319,66 @@ export interface SanitizeResult {
   preview: string;
   /** e.g. "No text layer found (scanned PDF?)" */
   warnings: string[];
+  /** What the local AI deep scan added; null when it is off. */
+  aiDeepScan: AiDeepScan | null;
+}
+
+export interface AiDeepScan {
+  /** Values the model found (verified by Zuko) that the patterns had not masked. */
+  items: number;
+  /** Of those, values the vault had never seen. */
+  newItems: number;
+  model: string;
+  ms: number;
+  error: string | null;
+}
+
+/** `localAi` in the policy. The local model may only make Zuko stricter. */
+export interface LocalAiConfig {
+  enabled: boolean;
+  /** Loopback only: http://127.0.0.1, http://localhost or http://[::1]. */
+  endpoint: string;
+  model: string;
+  deepScanPrompts: boolean;
+  deepScanDocuments: boolean;
+  explainRisk: boolean;
+  /** The gateway waits up to timeoutMs for the scan of the newest prompt. */
+  waitForPromptScan: boolean;
+  timeoutMs: number;
+}
+
+export interface LocalAiStatus {
+  enabled: boolean;
+  endpoint: string;
+  model: string;
+  endpointOk: boolean;
+  reachable: boolean;
+  modelPresent: boolean;
+  models: string[];
+  error: string | null;
+  /** e.g. `ollama pull gemma3:4b` */
+  hint: string | null;
+}
+
+export interface AiFinding {
+  kind: string;
+  value: string;
+  label: string;
+}
+
+export interface LocalAiTest {
+  sample: string;
+  findings: AiFinding[];
+  ms: number;
+  error: string | null;
+}
+
+/** `ai-explain`: a local AI explanation for an approval card or a feed item. */
+export interface AiExplainEvent {
+  requestId: string | null;
+  activityId: string | null;
+  text: string;
+  model: string;
 }
 
 export interface RiskFactor {
@@ -451,6 +519,7 @@ export interface Policy {
     maskToolOutput: boolean;
     secretHosts: Record<string, string[]>;
   };
+  localAi: LocalAiConfig;
 }
 
 /** Placeholder kinds the detector emits (zuko-core detect::kinds). */
@@ -487,6 +556,7 @@ export interface EventMap {
   activity: ActivityItem;
   privacy: PrivacyEvent;
   "protection-changed": ProtectionStatus;
+  "ai-explain": AiExplainEvent;
 }
 
 export type BridgeEventName = keyof EventMap;

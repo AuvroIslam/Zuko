@@ -17,6 +17,7 @@
 
 use crate::action::Action;
 use crate::detect::DetectorConfig;
+use crate::localai::LocalAiConfig;
 use crate::risk::Tier;
 use crate::Ctx;
 use serde::{Deserialize, Serialize};
@@ -170,6 +171,9 @@ pub struct Policy {
     pub tools: ToolPolicy,
     pub approvals: Approvals,
     pub privacy: PrivacyPolicy,
+    /// Optional local LLM (Ollama). Off by default; see [`crate::localai`] for the
+    /// rule that it may only make Zuko stricter.
+    pub local_ai: LocalAiConfig,
 }
 
 fn strs(v: &[&str]) -> Vec<String> {
@@ -309,6 +313,7 @@ impl Default for Policy {
             tools: ToolPolicy::default(),
             approvals: Approvals::default(),
             privacy: PrivacyPolicy::default(),
+            local_ai: LocalAiConfig::default(),
         }
     }
 }
@@ -339,6 +344,7 @@ impl Policy {
     /// `self` (global) with `project` layered on top: lists are unioned (blocked/ask/
     /// sensitive grow; a project cannot remove global blocks), scalars take the stricter
     /// value (Enforce beats Monitor, lower tiers for hold/block win, auto-allow is ANDed).
+    /// `localAi` always comes from the global policy.
     pub fn merged_with(&self, project: &Policy) -> Policy {
         let det_a = &self.privacy.detector;
         let det_b = &project.privacy.detector;
@@ -404,6 +410,9 @@ impl Policy {
                 mask_tool_output: self.privacy.mask_tool_output || project.privacy.mask_tool_output,
                 secret_hosts,
             },
+            // The local model is the user's machine-wide choice: a project file cannot
+            // switch it on, point it elsewhere or change what it sees.
+            local_ai: self.local_ai.clone(),
         }
     }
 

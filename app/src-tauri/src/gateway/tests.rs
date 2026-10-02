@@ -200,9 +200,13 @@ async fn start_mock(log: Log) -> String {
 }
 
 async fn harness() -> Harness {
+    harness_with(zuko_core::policy::Policy::default()).await
+}
+
+async fn harness_with(policy: zuko_core::policy::Policy) -> Harness {
     let upstream_log: Log = Arc::default();
     let upstream = start_mock(upstream_log.clone()).await;
-    let engine = Engine::with_parts(zuko_core::policy::Policy::default(), zuko_core::vault::Vault::new(), CtxBase::default());
+    let engine = Engine::with_parts(policy, zuko_core::vault::Vault::new(), CtxBase::default());
     let host = Host::Headless(Headless { engine, verbose: false, dump: None });
     let shared = Arc::new(Shared::new(host, TOKEN.into(), upstream).unwrap());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -476,4 +480,94 @@ async fn upstream_disconnect_mid_stream_is_propagated() {
     let resp = h.post("/v1/messages", &prompt_request(true)).await;
     assert_eq!(resp.status(), 200);
     assert!(resp.text().await.is_err(), "the client must see a broken stream, not a clean end");
+}
+
+// ── Local AI (mock Ollama) ────────────────────────────────────────────────────
+
+const NAME_PROMPT: &str = "Please email the contract to Rahim Uddin at House 12, Road 5, Dhanmondi, Dhaka";
+
+fn name_request() -> Value {
+    json!({
+        "model": "claude-haiku-mock", "max_tokens": 64, "stream": false,
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": "<system-reminder>context</system-reminder>"},
+            {"type": "text", "text": NAME_PROMPT}
+        ]}]
+    })
+}
+
+fn ai_policy(ollama: &str, wait: bool, timeout_ms: u64) -> zuko_core::policy::Policy {
+    let mut p = zuko_core::policy::Policy::default();
+    p.local_ai = zuko_core::localai::LocalAiConfig {
+        enabled: true,
+        endpoint: ollama.into(),
+        wait_for_prompt_scan: wait,
+        timeout_ms,
+        ..Default::default()
+    };
+    p
+}
+
+#[tokio::test]
+async fn waiting_for_the_ai_scan_masks_a_name_on_its_first_send() {
+    let ollama = crate::localai::mock::start(Default::default()).await;
+    let h = harness_with(ai_policy(&ollama.url, true, 3000)).await;
+    assert_eq!(h.post("/v1/messages", &name_request()).await.status(), 200);
+    let sent = h.last_body();
+    assert!(!sent.contains("Rahim Uddin") && !sent.contains("Dhanmondi"), "raw PII reached upstream: {sent}");
+    assert!(sent.contains("{{NAME_1}}") && sent.contains("{{ADDRESS_1}}"));
+    // The model saw only the user's text, not the system reminder.
+    assert!(!ollama.chat_bodies().concat().contains("system-reminder>context"));
+}
+
+#[tokio::test]
+async fn background_ai_scans_mask_later_requests_and_never_delay_this_one() {
+    let ollama = crate::localai::mock::start(crate::localai::mock::Script { delay: Duration::from_millis(300), ..Default::default() }).await;
+    let h = harness_with(ai_policy(&ollama.url, false, 3000)).await;
+    let started = std::time::Instant::now();
+    assert_eq!(h.post("/v1/messages", &name_request()).await.status(), 200);
+    assert!(started.elapsed() < Duration::from_millis(280), "the request waited for the model");
+    // The known limitation: the first send of a new name goes out as typed.
+    assert!(h.last_body().contains("Rahim Uddin"));
+    // Once the background scan is done, every later request masks it.
+    for _ in 0..100 {
+        if h.shared.host.engine().unwrap().vault_snapshot().len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(h.post("/v1/messages", &name_request()).await.status(), 200);
+    let sent = h.last_body();
+    assert!(!sent.contains("Rahim Uddin") && sent.contains("{{NAME_1}}"), "{sent}");
+}
+
+#[tokio::test]
+async fn a_dead_or_lying_model_leaves_the_gateway_exactly_as_before() {
+    // An invented finding, wait mode: forwarded with deterministic masking only.
+    let liar = crate::localai::mock::start(crate::localai::mock::Script {
+        content: Some(r#"{"findings":[{"kind":"NAME","value":"Not In The Text"}]}"#.into()),
+        ..Default::default()
+    })
+    .await;
+    let h = harness_with(ai_policy(&liar.url, true, 3000)).await;
+    assert_eq!(h.post("/v1/messages", &prompt_request(false)).await.status(), 200);
+    let sent = h.last_body();
+    assert!(sent.contains("{{API_KEY_1}}") && sent.contains("{{EMAIL_1}}") && !sent.contains(KEY));
+    assert_eq!(h.shared.host.engine().unwrap().vault_snapshot().len(), 2, "nothing invented was added");
+    // The model never saw the key or the email: it got the masked text.
+    let shown = liar.chat_bodies().concat();
+    assert!(!shown.contains(KEY) && !shown.contains(EMAIL) && shown.contains("{{API_KEY_1}}"));
+
+    // A model that never answers: the request waits at most the timeout, then goes.
+    let slow = crate::localai::mock::start(crate::localai::mock::Script { delay: Duration::from_secs(10), ..Default::default() }).await;
+    let h = harness_with(ai_policy(&slow.url, true, 500)).await;
+    let started = std::time::Instant::now();
+    assert_eq!(h.post("/v1/messages", &prompt_request(false)).await.status(), 200);
+    assert!(started.elapsed() < Duration::from_millis(2500), "took {:?}", started.elapsed());
+    assert!(!h.last_body().contains(KEY));
+
+    // Nothing listening at all.
+    let h = harness_with(ai_policy("http://127.0.0.1:1", true, 500)).await;
+    assert_eq!(h.post("/v1/messages", &prompt_request(false)).await.status(), 200);
+    assert!(!h.last_body().contains(KEY));
 }

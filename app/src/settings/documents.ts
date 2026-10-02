@@ -60,6 +60,9 @@ export function documentsSection(): HTMLElement {
           h("span", { class: "finding", title: f.kind }, h("span", { text: f.label }),
             h("code", { text: placeholder(f.key) }), f.count > 1 ? h("em", { text: `×${f.count}` }) : null)))
         : null,
+      r.aiDeepScan && (r.aiDeepScan.items > 0 || !r.aiDeepScan.error)
+        ? h("span", { class: "hint", text: `AI deep scan: +${plural(r.aiDeepScan.items, "item")} (${r.aiDeepScan.model}, ${(r.aiDeepScan.ms / 1000).toFixed(1)} s)` })
+        : null,
       ...r.warnings.map((w) => notice("warn", w)),
       h("pre", { class: "preview-box", text: r.preview }),
       h("div", { class: "row" }, show, copy, h("span", { class: "path", text: r.outputPath })),

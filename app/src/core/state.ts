@@ -41,6 +41,8 @@ export interface ApprovalInfo {
   zuko: ZukoHookInfo | null;
   /** performance.now() when the request arrived. */
   receivedAt: number;
+  /** Local AI explanation (`ai-explain`), when one arrives. Display only. */
+  aiExplanation: string | null;
 }
 
 export interface ChatMessage {
@@ -371,6 +373,21 @@ class AppState {
     this.activity.unshift(item);
     if (this.activity.length > ACTIVITY_LIMIT) this.activity.length = ACTIVITY_LIMIT;
     this.notify();
+  }
+
+  /** A local AI explanation arrived (`ai-explain`): attach it to its card or feed item. */
+  applyExplanation(e: { requestId: string | null; activityId: string | null; text: string }) {
+    let hit = false;
+    if (e.requestId && this.pendingApproval?.requestId === e.requestId) {
+      this.pendingApproval = { ...this.pendingApproval, aiExplanation: e.text };
+      hit = true;
+    }
+    const item = e.activityId ? this.activity.find((a) => a.id === e.activityId) : undefined;
+    if (item) {
+      item.aiExplanation = e.text;
+      hit = true;
+    }
+    if (hit) this.notify();
   }
 
   /** Replaces the feed with a newest-first list from Rust, keeping anything newer. */

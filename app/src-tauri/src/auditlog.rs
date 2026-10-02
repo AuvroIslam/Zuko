@@ -190,6 +190,14 @@ impl AuditLog {
         }
     }
 
+    /// Attaches the local model's explanation to a remembered item (if still in the ring).
+    pub fn annotate_activity(&self, id: &str, text: &str) {
+        let mut ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(item) = ring.iter_mut().rev().find(|i| i.id == id) {
+            item.ai_explanation = Some(text.to_string());
+        }
+    }
+
     /// Newest first.
     pub fn recent(&self, limit: usize) -> Vec<ActivityItem> {
         let ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
@@ -326,6 +334,7 @@ fn item_from_receipt(r: &Receipt) -> ActivityItem {
         headline: r.summary.clone(),
         rules: r.rules.clone(),
         keys: r.keys.clone(),
+        ai_explanation: None,
     }
 }
 
@@ -351,6 +360,11 @@ pub fn append(receipt: Receipt) -> Receipt {
 /// Keeps `item` in the in-memory ring used by `activity_recent`.
 pub fn remember_activity(item: &ActivityItem) {
     global().remember_activity(item);
+}
+
+/// See [`AuditLog::annotate_activity`].
+pub fn annotate_activity(id: &str, text: &str) {
+    global().annotate_activity(id, text);
 }
 
 /// Newest first.

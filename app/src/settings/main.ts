@@ -1,6 +1,6 @@
 // Settings window — the place where anything that writes to disk is confirmed.
 // One scrolling page with a sticky section nav: Protection, Policy, Vault,
-// Activity, Documents, Browser, Claude and General.
+// Activity, Documents, Local AI, Browser, Claude and General.
 
 import "./settings.css";
 import { Bridge, IS_MOCK, onEvent, type ProtectionStatus } from "../core/bridge";
@@ -11,6 +11,7 @@ import { policySection } from "./policy";
 import { vaultSection } from "./vault";
 import { activitySection } from "./activity";
 import { documentsSection } from "./documents";
+import { localAiSection } from "./localai";
 import { feedback, hint, section, setDot, statusDot, toggle } from "./ui";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
@@ -209,6 +210,7 @@ const SECTIONS: [id: string, label: string][] = [
   ["vault", "Vault"],
   ["activity", "Activity"],
   ["documents", "Documents"],
+  ["localai", "Local AI"],
   ["browser", "Browser"],
   ["claude", "Claude"],
   ["general", "General"],
@@ -261,6 +263,7 @@ async function main() {
     vaultSection(vault),
     activitySection(activity, status?.auditPath ?? ""),
     documentsSection(),
+    localAiSection(policy),
     browserSection(status),
     apiSection(hasKey ?? false),
     generalSection(),
@@ -274,7 +277,7 @@ async function main() {
       h("h1", {}, h("span", { text: "Zuko" }), h("span", { class: "version", text: version ? `v${version}` : "" })),
       nav()),
     ...sections.filter((s) => !only || only.includes(s.id)),
-    hint("No telemetry. Zuko only talks to the Claude API, through your own login or key."),
+    hint("No telemetry. Zuko only talks to the Claude API, through your own login or key (and, if you turn it on, to Ollama on this computer)."),
   );
 
   void onEvent("settings-changed", (s) => {

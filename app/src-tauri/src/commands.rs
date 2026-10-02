@@ -22,12 +22,14 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 use zuko_core::audit::Receipt;
 use zuko_core::mask::{self, MaskCtx, MaskReport};
+use zuko_core::localai::LocalAiConfig;
 use zuko_core::policy::Policy;
 use zuko_core::vault::EntryView;
 
 use crate::engine::{self, Engine};
 use crate::events::{self, ActivityItem, PrivacyNote};
 use crate::hooks::{self, HookPreview, InstallOptions};
+use crate::localai::{self, LocalAiStatus, LocalAiTest};
 use crate::sanitize::{self, SanitizeResult};
 use crate::{auditlog, gateway, log, policystore};
 
@@ -186,6 +188,14 @@ fn clean_policy(mut p: Policy) -> Result<Policy, String> {
     if p.approvals.hold_ms > MAX_HOLD_MS {
         return Err(format!("Hold-to-approve can be at most {} seconds.", MAX_HOLD_MS / 1000));
     }
+    // Loopback only, a plausible model name (the client checks again on every call).
+    p.local_ai.endpoint = p.local_ai.endpoint.trim().to_string();
+    p.local_ai.model = p.local_ai.model.trim().to_string();
+    p.local_ai.validate()?;
+    let t = p.local_ai.timeout_ms;
+    if !(zuko_core::localai::MIN_TIMEOUT_MS..=zuko_core::localai::MAX_TIMEOUT_MS).contains(&t) {
+        return Err("The local AI timeout must be between 0.5 and 120 seconds.".into());
+    }
     Ok(p)
 }
 
@@ -200,6 +210,7 @@ pub fn policy_set(app: AppHandle, engine: State<Engine>, policy: Policy) -> Resu
     engine.set_policy(policy)?;
     audit_note(&engine, "Policy", "policy.json", "Policy updated", "info", Vec::new());
     events::protection_changed(&app);
+    localai::warm_up(&app);
     Ok(())
 }
 
@@ -210,6 +221,30 @@ pub fn policy_reset(app: AppHandle, engine: State<Engine>) -> Result<Policy, Str
     audit_note(&engine, "Policy", "policy.json", "Policy reset to the defaults", "info", Vec::new());
     events::protection_changed(&app);
     Ok(p)
+}
+
+// ── Local AI ──────────────────────────────────────────────────────────────────
+
+/// Is Ollama reachable, is the model installed, which models are there. `config`:
+/// the settings window's unsaved draft (endpoint/model), else the saved policy.
+#[tauri::command]
+pub async fn localai_status(engine: State<'_, Engine>, config: Option<LocalAiConfig>) -> Result<LocalAiStatus, String> {
+    let cfg = config.unwrap_or_else(|| engine.policy().local_ai.clone());
+    Ok(engine.localai().status(&cfg).await)
+}
+
+/// Runs a deep scan on a made-up sentence (fake name and address) and returns the
+/// verified findings. Works before the feature is enabled; never touches the vault.
+#[tauri::command]
+pub async fn localai_test(engine: State<'_, Engine>, config: Option<LocalAiConfig>) -> Result<LocalAiTest, String> {
+    let cfg = config.unwrap_or_else(|| engine.policy().local_ai.clone());
+    let started = std::time::Instant::now();
+    let result = engine.localai().deep_scan_fresh(&cfg, localai::TEST_SAMPLE).await;
+    let ms = started.elapsed().as_millis() as u64;
+    Ok(match result {
+        Ok(findings) => LocalAiTest { sample: localai::TEST_SAMPLE.into(), findings, ms, error: None },
+        Err(e) => LocalAiTest { sample: localai::TEST_SAMPLE.into(), findings: Vec::new(), ms, error: Some(e.to_string()) },
+    })
 }
 
 // ── Vault ─────────────────────────────────────────────────────────────────────

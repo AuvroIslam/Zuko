@@ -234,6 +234,9 @@ struct Masked {
     vault: Option<Vault>,
     outcome: RequestOutcome,
     report: Option<Report>,
+    /// The newest user text after masking, for the local AI's background deep scan
+    /// (only filled in when that scan is on).
+    scan_text: Option<String>,
 }
 
 /// Masking in the newest message, which is what the user just typed or a tool just
@@ -264,10 +267,27 @@ async fn masked(shared: Arc<Shared>, req: Request<Incoming>, route: &'static str
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
 
+    // Local AI (optional, stricter-only): with "wait for AI scan on prompts" the
+    // newest user text is deep-scanned first, bounded by timeoutMs, so values the
+    // model finds are already in the vault when the body is masked below. A timeout
+    // or a bad answer just means the deterministic masking alone applies.
+    let ai = shared.host.engine().map(|e| e.policy().local_ai.clone()).unwrap_or_default();
+    let ai_scan = route == MESSAGES && ai.scans_prompts();
+    if ai_scan && ai.wait_for_prompt_scan {
+        let text = serde_json::from_slice::<Value>(&raw).ok().as_ref().and_then(crate::localai::newest_user_text);
+        if let (Some(text), Some(engine)) = (text, shared.host.engine()) {
+            match crate::localai::learn(engine, &text, false).await {
+                Ok(learned) => shared.host.ai_learned(&learned, session_id.clone()),
+                Err(e) => shared.host.trace(format!("local AI scan skipped: {e}")),
+            }
+        }
+    }
+
     let work = {
         let shared = shared.clone();
         let raw = raw.clone();
-        tokio::task::spawn_blocking(move || mask_body(&shared.host, &raw))
+        let want_scan = ai_scan && !ai.wait_for_prompt_scan;
+        tokio::task::spawn_blocking(move || mask_body(&shared.host, &raw, want_scan))
     };
     let m = match work.await {
         Ok(Some(m)) => m,
@@ -301,6 +321,20 @@ async fn masked(shared: Arc<Shared>, req: Request<Incoming>, route: &'static str
     }
     shared.host.dump(&m.body);
 
+    // Background mode: scan what the user just typed after this request has gone
+    // (already masked, so known values never reach the model). New values are
+    // interned and masked from the next request on — the known first-send gap.
+    if let Some(text) = m.scan_text.clone() {
+        let shared = shared.clone();
+        let session_id = session_id.clone();
+        tokio::spawn(async move {
+            let Some(engine) = shared.host.engine() else { return };
+            if let Ok(learned) = crate::localai::learn(engine, &text, true).await {
+                shared.host.ai_learned(&learned, session_id);
+            }
+        });
+    }
+
     let mut headers = upstream_headers(&parts.headers);
     headers.remove(header::CONTENT_LENGTH); // reqwest sets it for the new body
     let sent = shared.client.request(parts.method, url).headers(headers).body(m.body).send().await;
@@ -333,14 +367,15 @@ async fn masked(shared: Arc<Shared>, req: Request<Incoming>, route: &'static str
     }
 }
 
-/// Masks `raw` with the shared engine. `None` if there is no engine.
-fn mask_body(host: &Host, raw: &Bytes) -> Option<Masked> {
+/// Masks `raw` with the shared engine. `None` if there is no engine. `want_scan`:
+/// also return the newest user text (masked) for the local AI.
+fn mask_body(host: &Host, raw: &Bytes, want_scan: bool) -> Option<Masked> {
     let engine = host.engine()?;
     let mut body: Value = match serde_json::from_slice(raw) {
         Ok(v) => v,
         Err(e) => {
             host.warn(format!("request body is not JSON ({e}); forwarded unchanged"));
-            return Some(Masked { body: raw.clone(), vault: None, outcome: RequestOutcome::default(), report: None });
+            return Some(Masked { body: raw.clone(), vault: None, outcome: RequestOutcome::default(), report: None, scan_text: None });
         }
     };
     let detector = engine.detector();
@@ -381,7 +416,8 @@ fn mask_body(host: &Host, raw: &Bytes) -> Option<Masked> {
         labels: keys.iter().map(|k| vault.get(k).map(|e| e.label.clone()).unwrap_or_default()).collect(),
         keys,
     });
-    Some(Masked { body: sent, vault: Some(vault), outcome, report })
+    let scan_text = if want_scan { crate::localai::newest_user_text(&body) } else { None };
+    Some(Masked { body: sent, vault: Some(vault), outcome, report, scan_text })
 }
 
 fn newest_message(body: &Value) -> Option<&Value> {
