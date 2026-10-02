@@ -634,6 +634,10 @@ export class Island {
     this.botCx.set(this.botCx.target);
     this.botCy.set(this.botCy.target);
     this.botSize.set(this.botSize.target);
+    // A still: Zuko at rest in his state (eyes open, aura and ring settled).
+    this.engine.setState(State.effectiveState);
+    this.engine.snapToState();
+    this.engine.autoBlink = false;
     this.dirty = true;
     this.ensureRunning();
   }

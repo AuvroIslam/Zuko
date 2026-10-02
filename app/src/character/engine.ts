@@ -461,6 +461,9 @@ export class BotEngine {
   private locks = new Set<PropKey>();
   private particles: Particle[] = [];
 
+  /** Blink now and then (dev stills turn it off). */
+  autoBlink = true;
+
   lookX = 0;
   lookY = 0;
 
@@ -1011,7 +1014,7 @@ export class BotEngine {
     this.dangerMix += ((this.cfg.fire === "danger" ? 1 : 0) - this.dangerMix) * kSlow;
     this.successMix += ((this.cfg.fire === "success" ? 1 : 0) - this.successMix) * kSlow;
 
-    if (n > this.nextBlink) {
+    if (this.autoBlink && n > this.nextBlink) {
       if (this.state !== "sleeping" && this.state !== "dizzy") {
         this.blink();
         if (Math.random() < 0.22) setTimeout(() => this.blink(), 230);
@@ -1300,7 +1303,14 @@ export class BotEngine {
     const N = tier === 2 ? 12 : 8;
     const left: number[] = [];
     const right: number[] = [];
-    x.fillStyle = INK_S;
+    // Near-black hair with a warm rim, so it still reads on the black island.
+    const hg = x.createLinearGradient(qx, qy - 0.8 * u, qx + 1.1 * u, qy + 0.7 * u);
+    hg.addColorStop(0, "#4A322B");
+    hg.addColorStop(0.5, "#33221E");
+    hg.addColorStop(1, "#24170F");
+    x.lineJoin = "round";
+    x.lineWidth = Math.max(0.6, (tier === 0 ? 0.05 : 0.03) * u);
+    x.strokeStyle = "rgba(168,110,84,0.85)";
     for (const lock of LOCKS) {
       if (lock.tier > tier) continue;
       left.length = 0;
@@ -1322,7 +1332,7 @@ export class BotEngine {
         const l = Math.hypot(tx, ty) || 1;
         tx /= l;
         ty /= l;
-        const w = lock.w * u * (0.55 + 0.75 * Math.sin(Math.PI * s * 0.85)) * (1 - s * s * s);
+        const w = lock.w * (tier === 0 ? 1.45 : 1) * u * (0.55 + 0.75 * Math.sin(Math.PI * s * 0.85)) * (1 - s * s * s);
         left.push(X - ty * w, Y + tx * w);
         right.push(X + ty * w, Y - tx * w);
         px = X;
@@ -1334,12 +1344,14 @@ export class BotEngine {
       x.lineTo(px, py);
       for (let i = right.length - 2; i >= 0; i -= 2) x.lineTo(right[i], right[i + 1]);
       x.closePath();
+      x.stroke();
+      x.fillStyle = hg;
       x.fill();
     }
     // A sheen along the main lock.
     if (tier === 2) {
       const lock = LOCKS[0];
-      x.strokeStyle = "rgba(120,80,64,0.55)";
+      x.strokeStyle = "rgba(150,100,80,0.6)";
       x.lineWidth = Math.max(0.6, 0.035 * u);
       x.lineCap = "round";
       x.beginPath();
@@ -1360,7 +1372,7 @@ export class BotEngine {
   private drawTie(x: CanvasRenderingContext2D, u: number, ox: number, hy: number, tier: Tier) {
     const top = hy - 1.3 * u;
     const bot = hy - 0.93 * u;
-    const hw = (tier === 0 ? 0.14 : 0.115) * u;
+    const hw = (tier === 0 ? 0.19 : 0.115) * u;
     const lw = Math.max(0.6, (tier === 0 ? 0.05 : 0.03) * u);
 
     x.fillStyle = INK_S;
@@ -1383,7 +1395,7 @@ export class BotEngine {
       x.fillRect(ox - hw, bot - 0.07 * u - bh / 2, hw * 2, bh);
     }
     x.lineWidth = lw;
-    x.strokeStyle = "rgba(43,29,26,0.85)";
+    x.strokeStyle = tier === 0 ? "rgba(43,29,26,0.5)" : "rgba(43,29,26,0.85)";
     roundRectPath(x, ox - hw, top, hw * 2, bot - top, hw * 0.4);
     x.stroke();
   }

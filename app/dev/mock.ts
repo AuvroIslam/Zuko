@@ -480,6 +480,11 @@ const SCENES: Record<string, (island: Island) => void> = {
     }, 400);
     freezeFire(island, 0.34, 900);
   },
+  // The compact island with an agent at work (the 20 px Zuko and the mini grid).
+  compact: (island) => {
+    working();
+    island.collapse();
+  },
   // An agent at work: Zuko hovers on his ring of fire.
   "fire-ring": (island) => {
     State.isPinned = true;
@@ -610,4 +615,11 @@ export function playScene(name: string, island: Island) {
     for (const ms of [0, 60, 200, 500]) window.setTimeout(() => island.snapGeometry(), ms);
   }
   scene(island);
+  // `&dbg=1`: the island bot's pose lands in document.title (read with --dump-dom).
+  if (new URLSearchParams(window.location.search).has("dbg")) {
+    window.setTimeout(() => {
+      const e = (island as unknown as { engine: Record<string, unknown> }).engine;
+      document.title = `dbg state=${e.state} eye=${e.eyeOverride} open=${e.open} glow=${e.glow} boot=${e.boot} ring=${e.ringLevel} aura=${e.flameLevel}`;
+    }, 2500);
+  }
 }
