@@ -33,16 +33,23 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 // ── Files ─────────────────────────────────────────────────────────────────────
 
-/// %APPDATA%\Zuko — preferences.
+/// %APPDATA%\Zuko — preferences (or `ZUKO_CONFIG_DIR`, see `dir_override`).
 pub fn config_dir() -> PathBuf {
+    if let Some(dir) = super::dir_override("ZUKO_CONFIG_DIR") {
+        return dir;
+    }
     let base = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     base.join("Zuko")
 }
 
-/// %LOCALAPPDATA%\Zuko — where zuko-hook.exe, the inbox and the log live.
+/// %LOCALAPPDATA%\Zuko — where zuko-hook.exe, the inbox and the log live (or
+/// `ZUKO_DATA_DIR`, see `dir_override`).
 pub fn local_dir() -> PathBuf {
+    if let Some(dir) = super::dir_override("ZUKO_DATA_DIR") {
+        return dir;
+    }
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
