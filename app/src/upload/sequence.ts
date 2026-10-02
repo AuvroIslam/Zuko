@@ -1,7 +1,7 @@
 // The drop choreography — port of UploadSequenceEngine.swift, itself a port of
 // design/prototype/upload-sequence.html. Zuko does not eat the file: it stands
-// beside it while you drag, and once dropped the file settles in front of its
-// visor, a beam sweeps it top to bottom and a shield-check badge pops on it.
+// beside it while you drag, and once dropped the file settles in front of him,
+// a sweep of fire runs down it (`scan`, `beam`) and a flame-shield check pops on it.
 // The phase timestamps are unchanged (the T_SUCK_* / T_CHEW_* names are kept
 // for the island and the canvas; they now bound the scan and the badge).
 //
@@ -34,7 +34,7 @@ export const USC = {
   CHOOSE_D: 62,
   LOCK_IN: 60,
   LOCK_OUT: 90,
-  /** Zuko stands this far left of the file so its visor can see it. */
+  /** Zuko stands this far left of the file so he can aim his fist at it. */
   SIDE: 66,
   MOUTH_AJAR: 0.2,
   MOUTH_OPEN: 0.42,
@@ -511,7 +511,7 @@ class UploadSequence {
     f.mouth = this.mouth.v;
 
     // The file: at the cursor while dragging; on the drop it settles in front
-    // of Zuko's visor, is scanned, gets its badge, then shrinks away as Zuko
+    // of Zuko, is burned clean by his fire sweep, gets its badge, then shrinks away as Zuko
     // heads for the progress bar.
     const scanX = this.bx.v + USC.SIDE;
     const scanY = this.by.v - 4;

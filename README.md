@@ -13,7 +13,9 @@ and the cloud model. It:
   dangerous ones**, so "Allow" stops being a reflex.
 
 It lives at the top of your screen as a small guardian, Zuko, who lights up when an
-agent needs you.
+agent needs you. He is a chibi fan tribute to Prince Zuko from *Avatar: The Last
+Airbender* — glowing amber eyes, scar and topknot — and he throws fireballs at the
+things he blocks.
 
 ---
 

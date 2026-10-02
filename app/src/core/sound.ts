@@ -7,7 +7,7 @@ export const SOUND_NAMES = [
   "peek", "open", "close", "hover", "blip", "slap", "annoyed", "dizzy", "greet",
   "work", "finish", "error", "approval", "question", "approve", "gulp", "tick",
   "send", "love", "pop", "proud", "wink", "yawn", "attach", "think", "search",
-  "rate", "sleep",
+  "rate", "sleep", "fire", "fireball", "burst",
 ] as const;
 
 export type SoundName = (typeof SOUND_NAMES)[number];
@@ -59,8 +59,24 @@ const C6 = note(84), D6 = note(86), E6 = note(88), G6 = note(91);
 const A4 = note(69), B4 = note(71), G4 = note(67), C4 = note(60);
 
 /**
- * The 28 recipes. Short, soft and techy-friendly: sine and triangle tones with
- * smooth envelopes, a little filtered noise for clicks and whooshes.
+ * Fire crackle: a scatter of tiny band-passed noise pops, seeded so it is the
+ * same every launch.
+ */
+function crackle(seed: number, n: number, from: number, span: number, gain: number): Noise[] {
+  const rnd = mulberry32(seed);
+  return Array.from({ length: n }, () => ({
+    at: from + rnd() * span,
+    dur: 0.006 + rnd() * 0.012,
+    band: 1800 + rnd() * 4200,
+    q: 2.5,
+    gain: gain * (0.5 + rnd() * 0.5),
+    curve: 3,
+  }));
+}
+
+/**
+ * The 31 recipes. Short, soft and techy-friendly: sine and triangle tones with
+ * smooth envelopes, a little filtered noise for clicks, whooshes and fire.
  */
 const RECIPES: Record<SoundName, Recipe> = {
   // Island chrome
@@ -148,19 +164,54 @@ const RECIPES: Record<SoundName, Recipe> = {
 
   // Zuko's moods
   greet: {
-    // Boot-up sweep, a sparkle as the LEDs light, and the flame catching.
+    // A fiery whoosh spinning up, the landing thump, and a bright sparkle as
+    // the eyes ignite.
     tones: [
-      { f: 180, f2: 880, dur: 0.6, wave: "tri", attack: 0.12, curve: 1.2, gain: 0.7 },
-      { f: E6, at: 0.5, dur: 0.35, bell: 0.3, curve: 2.8, gain: 0.45 },
-      { f: G6, at: 0.58, dur: 0.4, curve: 3, gain: 0.3 },
+      { f: 120, f2: 70, at: 0.5, dur: 0.16, curve: 2.2, gain: 0.8 },
+      { f: E6, at: 0.72, dur: 0.32, bell: 0.3, curve: 2.8, gain: 0.35 },
+      { f: G6, at: 0.8, dur: 0.36, curve: 3, gain: 0.25 },
     ],
-    noise: [{ at: 0.66, dur: 0.32, band: 600, band2: 2400, q: 0.9, gain: 0.35, attack: 0.05 }],
+    noise: [
+      { dur: 0.55, band: 300, band2: 2200, q: 0.8, gain: 0.9, attack: 0.3, curve: 1.6 },
+      { at: 0.48, dur: 0.12, band: 500, q: 0.8, gain: 0.5, curve: 3 },
+      ...crackle(41, 9, 0.55, 0.45, 0.35),
+    ],
+    peak: 0.6,
+  },
+  fire: {
+    // Flame catching: a soft rising whoosh with crackle.
+    tones: [{ f: 90, f2: 160, dur: 0.3, wave: "tri", attack: 0.08, curve: 1.6, gain: 0.35 }],
+    noise: [
+      { dur: 0.34, band: 400, band2: 1600, q: 0.7, gain: 1, attack: 0.08, curve: 1.8 },
+      ...crackle(7, 8, 0.04, 0.3, 0.5),
+    ],
+    peak: 0.5,
+  },
+  fireball: {
+    // The launch: a fast whoosh sweeping up and away.
+    tones: [{ f: 220, f2: 90, dur: 0.22, wave: "tri", curve: 1.8, gain: 0.4 }],
+    noise: [
+      { dur: 0.3, band: 700, band2: 3600, q: 1.1, gain: 1, attack: 0.02, curve: 1.5 },
+      ...crackle(13, 5, 0.05, 0.2, 0.35),
+    ],
+    peak: 0.55,
+  },
+  burst: {
+    // The impact: a low thump, a bright pop and a tail of crackle.
+    tones: [
+      { f: 150, f2: 55, dur: 0.22, curve: 2.4, gain: 1 },
+      { f: 1400, f2: 700, dur: 0.06, curve: 2.6, gain: 0.25 },
+    ],
+    noise: [
+      { dur: 0.3, band: 1400, band2: 400, q: 0.7, gain: 0.9, curve: 2.2 },
+      ...crackle(29, 10, 0.05, 0.35, 0.45),
+    ],
     peak: 0.6,
   },
   gulp: {
-    // The scan pulse on a drop: a quick down-up sweep.
+    // The pulse on a drop: a quick down-up sweep as the fists flare.
     tones: [{ f: 1300, f2: 700, dur: 0.07, curve: 1.4 }, { f: 700, f2: 1500, at: 0.07, dur: 0.1, curve: 2 }],
-    noise: [{ dur: 0.16, band: 3000, band2: 1500, q: 2, gain: 0.15 }],
+    noise: [{ dur: 0.18, band: 900, band2: 2400, q: 1, gain: 0.3 }, ...crackle(3, 4, 0.04, 0.12, 0.25)],
     peak: 0.5,
   },
   slap: {

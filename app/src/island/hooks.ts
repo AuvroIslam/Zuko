@@ -149,7 +149,13 @@ export function registerHookHandlers(island: Island) {
 
 /** Zuko's own events: the activity feed, privacy notices and protection status. */
 export function registerZukoHandlers(island: Island) {
-  void onEvent("activity", (item) => State.pushActivity(item));
+  void onEvent("activity", (item) => {
+    const fresh = !State.activity.some((a) => a.id === item.id);
+    State.pushActivity(item);
+    // A firewall block: Zuko throws a fireball at it (the PreToolUse hook may
+    // have reported the same block a moment ago; the island throws one punch).
+    if (fresh && item.verdict === "deny" && !State.paused) island.fireBlock();
+  });
   void onEvent("protection-changed", (status) => State.setProtection(status));
   void onEvent("privacy", (event) => handlePrivacy(island, event));
 }
@@ -192,6 +198,8 @@ function handlePrivacy(island: Island, event: PrivacyEvent) {
   State.privacyNotice = event;
   Sound.play(event.direction === "blocked_prompt" ? "error" : "blip");
   island.showPrivacy();
+  // Masked: Zuko burns the secret into a placeholder with a puff of fire.
+  if (event.direction === "masked" && !State.pendingApproval) island.fireFlickAtPrivacy();
   State.notify();
 }
 
@@ -265,6 +273,8 @@ function handleHook(island: Island, payload: HookEventPayload) {
         if (!focused) State.setPillBadge(agentId, "denied");
         flagPolicy();
         Sound.play("error");
+        // ...and Zuko fire-punches the blocked line on the island.
+        island.fireBlock();
         window.setTimeout(() => {
           if (State.task(agentId)?.state === "error") State.updateTask(agentId, "working");
         }, 1600);

@@ -45,6 +45,11 @@ export class Island {
   private contentEl!: HTMLElement;
   private viewsEl!: HTMLElement;
   private botCanvas!: HTMLCanvasElement;
+  /** Full-window layer for fire that leaves the bot's box (fireballs, bursts). */
+  private fxCanvas!: HTMLCanvasElement;
+  private fxShown = false;
+  private fxSize = { w: 0, h: 0, dpr: 0 };
+  private lastBlockFire = Number.NEGATIVE_INFINITY;
   private botGlow!: HTMLElement;
   private greetingCanvas!: HTMLCanvasElement;
   private miniGrid!: HTMLElement;
@@ -101,6 +106,7 @@ export class Island {
     this.wireFsm();
     this.wireInput();
     this.engine.onDizzy = () => this.handleDizzy();
+    this.engine.onTripleSlap = () => this.fireAtCursor();
     this.greeting.onComplete = () => this.fsm.greetComplete();
     State.subscribe(() => {
       this.dirty = true;
@@ -168,6 +174,7 @@ export class Island {
     this.wakeStrip = h("div", { id: "wake-strip" });
     this.botGlow = h("div", { id: "bot-glow" });
     this.botCanvas = h("canvas", { id: "bot-canvas" });
+    this.fxCanvas = h("canvas", { id: "fx-canvas" });
     this.greetingCanvas = h("canvas", { id: "greeting-canvas" });
     this.miniGrid = h("div", { id: "mini-grid" });
     this.countdown = h("div", { id: "countdown" });
@@ -213,7 +220,7 @@ export class Island {
     this.greetingCanvas.style.width = `${EXPANDED_W}px`;
     this.greetingCanvas.style.height = "150px";
 
-    this.root.append(this.wakeStrip, this.islandEl);
+    this.root.append(this.wakeStrip, this.islandEl, this.fxCanvas);
     this.applyGeometry();
   }
 
@@ -384,6 +391,106 @@ export class Island {
     this.alert("privacy");
   }
 
+  // ── Firebending ─────────────────────────────────────────────────────────────
+
+  /** True while the island's own Zuko is on screen (not the greeting's or the drop canvas's). */
+  private get botOnScreen(): boolean {
+    return State.mode !== "hidden" && State.view !== "greeting" && !this.uploadActive &&
+      this.botCanvas.style.opacity !== "0";
+  }
+
+  /** Centre of an element in the active view, in effects-layer (client) coordinates. */
+  private viewPoint(selector: string, fx = 0.5, fy = 0.5, maxX = Infinity): { x: number; y: number } | null {
+    const el = this.viewsEl.querySelector<HTMLElement>(`.view.on ${selector}`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    return { x: r.left + Math.min(r.width * fx, maxX), y: r.top + r.height * fy };
+  }
+
+  /** A brief scorch glow on whatever the fire hit. */
+  private scorch(selector: string) {
+    const el = this.viewsEl.querySelector<HTMLElement>(`.view.on ${selector}`);
+    if (!el) return;
+    el.classList.remove("scorched");
+    void el.offsetWidth;
+    el.classList.add("scorched");
+    window.setTimeout(() => el.classList.remove("scorched"), 900);
+  }
+
+  /**
+   * The firewall blocked something: Zuko gets angry and fire-punches a
+   * fireball at the blocked line on the island, then calms down. Several
+   * blocks in a burst (the hook and the activity feed report the same one)
+   * throw a single punch.
+   */
+  fireBlock() {
+    const nowMs = performance.now();
+    if (nowMs - this.lastBlockFire < 1500) return;
+    this.lastBlockFire = nowMs;
+    // The hook has just revealed or re-laid the island: let it settle first.
+    window.setTimeout(() => {
+      if (!this.botOnScreen) return;
+      let target: { x: number; y: number } | null = null;
+      let hit = "";
+      if (State.mode === "expanded") {
+        // The current ticker row on the overview, the newest feed row on the
+        // activity list, otherwise the middle of the card.
+        target = this.viewPoint(".ticker", 0.4, 0.75, 150);
+        hit = ".ticker";
+        if (!target) { target = this.viewPoint(".feed-row", 0.45, 0.5, 220); hit = ".feed-row"; }
+        if (!target) { target = this.viewPoint(".card", 0.6, 0.5); hit = ""; }
+      } else {
+        const r = this.islandEl.getBoundingClientRect();
+        target = { x: r.right - 44, y: r.top + 16 };
+      }
+      this.engine.flareUp(1);
+      this.engine.shootFire(target, {
+        kind: "danger",
+        onImpact: () => { if (hit) this.scorch(hit); },
+      });
+      this.ensureRunning();
+    }, State.mode === "expanded" ? 80 : 420);
+  }
+
+  /**
+   * A secret was masked: a quick puff of flame off Zuko's fist at the privacy
+   * notice — he "burned the secret into a placeholder".
+   */
+  fireFlickAtPrivacy() {
+    window.setTimeout(() => {
+      if (!this.botOnScreen) return;
+      const target = State.view === "privacy" ? this.viewPoint(".pv-chip", 0.5, 0.5) : null;
+      this.engine.fireFlick(target, { onImpact: () => this.scorch(".pv-chip") });
+      this.ensureRunning();
+    }, State.mode === "expanded" ? 420 : 120);
+  }
+
+  /** Triple-click on Zuko: a fire punch towards where you clicked. */
+  fireAtCursor() {
+    const a = this.engine.fxAnchor;
+    if (!a || !this.botOnScreen) return;
+    let dx = State.mouse.x - a.x;
+    let dy = State.mouse.y - a.y;
+    const l = Math.hypot(dx, dy);
+    if (l < 3) { dx = 1; dy = 0; } else { dx /= l; dy /= l; }
+    // Keep the shot mostly level so it stays over the island.
+    dy = clamp(dy, -0.45, 0.45);
+    const r = this.islandEl.getBoundingClientRect();
+    const target = {
+      x: clamp(a.x + dx * 190, r.left + 14, r.right - 14),
+      y: clamp(a.y + dy * 190, r.top + 12, r.bottom - 12),
+    };
+    this.engine.shootFire(target);
+    this.ensureRunning();
+  }
+
+  /** Dev only: freezes the fire `at` seconds into the last effect (screenshots). */
+  freezeFx(at: number) {
+    this.engine.freezeFx(at);
+    this.ensureRunning();
+  }
+
   // ── File drop ───────────────────────────────────────────────────────────────
 
   private onDragDrop(e: { type: string; paths?: string[] }) {
@@ -527,6 +634,10 @@ export class Island {
     this.botCx.set(this.botCx.target);
     this.botCy.set(this.botCy.target);
     this.botSize.set(this.botSize.target);
+    // A still: Zuko at rest in his state (eyes open, aura and ring settled).
+    this.engine.setState(State.effectiveState);
+    this.engine.snapToState();
+    this.engine.autoBlink = false;
     this.dirty = true;
     this.ensureRunning();
   }
@@ -773,6 +884,11 @@ export class Island {
       this.drawBot(dt);
     }
 
+    // Fire that leaves the bot's box. The layer is cleared once when the last
+    // effect ends and then left alone.
+    const fxOn = State.mode !== "hidden" && !greetingActive && this.engine.fxActive;
+    if (fxOn || this.fxShown) this.drawFx(fxOn);
+
     const uploadActive = this.uploadActive;
     if (uploadActive) this.uploadCanvas.draw(UploadSeq.frame(), nowMs / 1000);
     this.uploadCanvas.el.classList.toggle("on", uploadActive);
@@ -854,8 +970,13 @@ export class Island {
       this.botCanvas.style.width = `${w}px`;
       this.botCanvas.style.height = `${hCss}px`;
     }
-    this.botCanvas.style.left = `${this.botCx.value - w / 2}px`;
-    this.botCanvas.style.top = `${this.botCy.value - BOT_OVERHANG / 2 - hCss / 2}px`;
+    const left = this.botCx.value - w / 2;
+    const top = this.botCy.value - BOT_OVERHANG / 2 - hCss / 2;
+    this.botCanvas.style.left = `${left}px`;
+    this.botCanvas.style.top = `${top}px`;
+    // Where the bot canvas sits on the full-window effects layer: the island is
+    // centred on the window (left 50%, translateX(-50%)) and glued to the top.
+    this.engine.fxOrigin = { x: (window.innerWidth - this.width.value) / 2 + left, y: top };
 
     const ctx = this.botCanvas.getContext("2d");
     if (!ctx) return;
@@ -878,6 +999,27 @@ export class Island {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, hCss);
     this.engine.draw(ctx, w, hCss);
+  }
+
+  /** Redraws the effects layer (or clears it for good when `on` is false). */
+  private drawFx(on: boolean) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = window.innerWidth;
+    const hh = window.innerHeight;
+    const s = this.fxSize;
+    if (s.w !== w || s.h !== hh || s.dpr !== dpr) {
+      this.fxSize = { w, h: hh, dpr };
+      this.fxCanvas.width = Math.round(w * dpr);
+      this.fxCanvas.height = Math.round(hh * dpr);
+      this.fxCanvas.style.width = `${w}px`;
+      this.fxCanvas.style.height = `${hh}px`;
+    }
+    const ctx = this.fxCanvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, hh);
+    if (on) this.engine.drawFx(ctx);
+    this.fxShown = on;
   }
 
   /** BotCanvasView.lookX / lookY — tanh of the distance to the bot. */
@@ -951,6 +1093,16 @@ export class Island {
 
     syncMiniBotStates(State.tasks);
     this.engine.setState(State.effectiveState);
+
+    // Fire looks that follow the state: flames simmer round Zuko's head while
+    // a high or critical card waits, and he hovers on a ring of fire while an
+    // agent is at work.
+    const tier = State.pendingApproval?.zuko?.tier;
+    this.engine.setFireAura(
+      State.view === "approval" && State.pendingApproval != null && (tier === "high" || tier === "critical"),
+    );
+    const s = State.effectiveState;
+    this.engine.setFireRing(s === "working" || s === "thinking" || s === "searching");
   }
 
   /** Applies settings coming from Rust at boot. */
