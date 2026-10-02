@@ -380,34 +380,11 @@ fn preview(text: &str) -> String {
     format!("{cut}…")
 }
 
+/// Test fixtures shared with other modules' tests.
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::engine::CtxBase;
-    use zuko_core::policy::Policy;
-    use zuko_core::vault::Vault;
-
-    const KEY: &str = "sk-proj-abcdefghijklmnopqrstuvwx1234";
-
-    fn tmp(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("zuko-san-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn engine() -> Engine {
-        Engine::with_parts(Policy::default(), Vault::new(), CtxBase::default())
-    }
-
-    fn run(e: &Engine, dir: &Path, file: &str, content: &[u8]) -> Result<(SanitizeResult, MaskReport), String> {
-        let p = dir.join(file);
-        std::fs::write(&p, content).unwrap();
-        sanitize_into(e, &p.to_string_lossy(), &dir.join("inbox"))
-    }
-
+pub(crate) mod tests_support {
     /// A small valid PDF: one page per entry, each with a Helvetica text object.
-    fn tiny_pdf(pages: &[&str]) -> Vec<u8> {
+    pub fn tiny_pdf(pages: &[&str]) -> Vec<u8> {
         let mut objs: Vec<String> = vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             format!(
@@ -445,6 +422,34 @@ mod tests {
             format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes(),
         );
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tests_support::tiny_pdf;
+    use super::*;
+    use crate::engine::CtxBase;
+    use zuko_core::policy::Policy;
+    use zuko_core::vault::Vault;
+
+    const KEY: &str = "sk-proj-abcdefghijklmnopqrstuvwx1234";
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("zuko-san-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn engine() -> Engine {
+        Engine::with_parts(Policy::default(), Vault::new(), CtxBase::default())
+    }
+
+    fn run(e: &Engine, dir: &Path, file: &str, content: &[u8]) -> Result<(SanitizeResult, MaskReport), String> {
+        let p = dir.join(file);
+        std::fs::write(&p, content).unwrap();
+        sanitize_into(e, &p.to_string_lossy(), &dir.join("inbox"))
     }
 
     #[test]
