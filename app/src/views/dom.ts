@@ -51,6 +51,33 @@ export function clear(el: Element) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
+/**
+ * Puts text on the clipboard. The async API needs a focused document, which the
+ * island (a no-activate window) usually isn't, so fall back to the old
+ * selection-based copy, which only needs the click that got us here.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+    document.body.append(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    area.remove();
+    return ok;
+  }
+}
+
 /** Card dot used in every "who" row. */
 export function dot(color: string, size = 7): HTMLElement {
   return h("i", {

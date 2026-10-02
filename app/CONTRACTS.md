@@ -25,9 +25,14 @@ It is the hook payload from Claude Code, **untruncated** (including `tool_respon
 { "stdout": { ...hook output object... } }   // printed verbatim by the relay
 { "stdout": null }                            // print nothing ("no opinion")
 ```
+For `hook_event_name: "ZukoExtension"` (native host), the reply is `{"reply": <message>}`.
 The relay waits for a reply for `PreToolUse`, `PostToolUse`, `UserPromptSubmit`,
-`SessionStart` (budget 1.5 s each) and `PermissionRequest` (two-phase: an `{"ack":true}`
-line within 800 ms, then the decision within 108 s). All other events are fire-and-forget.
+`SessionStart` (budget 1.5 s each) and `PermissionRequest` (budget 110 s). For
+`PermissionRequest` the app keeps Coucou's acknowledgement logic internally: if the island
+does not confirm the card within 800 ms, the app replies `{"stdout": null}` at once and
+Claude Code asks in the terminal; otherwise it replies when the human decides (≤ 108 s).
+Each reply is one line; the relay prints `stdout` verbatim. All other events are
+fire-and-forget (the app closes the connection without replying).
 
 **App unreachable / timeout:** the relay runs `zuko_core::guard::decide` itself with
 `%APPDATA%\Zuko\policy.json` (defaults if missing), no ledger, no vault:

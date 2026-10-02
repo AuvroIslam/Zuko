@@ -5,6 +5,7 @@ authors = ["AuvroIslam"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+default-run = "zuko"
 
 [lib]
 name = "zuko_lib"
@@ -19,8 +20,21 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+zuko-core = { path = "../core" }
+# Gateway (local Anthropic API proxy)
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+futures-util = "0.3"
+# Vault encryption at rest (key in the OS keyring)
+chacha20poly1305 = "0.10"
+getrandom = "0.2"
+base64 = "0.22"
+# Documents
+pdf-extract = "0.7"
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }

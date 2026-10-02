@@ -287,11 +287,13 @@ pub fn decline(app: &AppHandle, request_id: &str) {
 
 /// Called by the island's Allow / Deny buttons. Only ever a bare word: turning
 /// it into Claude Code's JSON is zuko-hook's job.
-pub fn answer(app: &AppHandle, request_id: &str, decision: &str) {
+/// `elapsed_ms` is how long the card was on screen before the click (rubber-stamp
+/// detection and the audit receipt).
+pub fn answer(app: &AppHandle, request_id: &str, decision: &str, elapsed_ms: Option<u64>) {
     let word = match decision {
         "allow" | "always" => "allow",
         _ => "deny",
     };
-    log::line(format!("decision id={request_id} {word}"));
+    log::line(format!("decision id={request_id} {word} after {elapsed_ms:?} ms"));
     send(app, request_id, Reply::Decision(word.to_string()), false);
 }

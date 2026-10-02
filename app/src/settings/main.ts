@@ -1,11 +1,17 @@
 // Settings window — the place where anything that writes to disk is confirmed.
-// Stage 2 covers the Claude Code hooks and the general preferences; API keys and
-// integrations land here too in a later stage.
+// One scrolling page with a sticky section nav: Protection, Policy, Vault,
+// Activity, Documents, Browser, Claude and General.
 
 import "./settings.css";
-import { Bridge, onEvent, type HookStatus } from "../core/bridge";
+import { Bridge, IS_MOCK, onEvent, type ProtectionStatus } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
-import { h, clear } from "../views/dom";
+import { h, clear, copyText } from "../views/dom";
+import { protectionSection } from "./protection";
+import { policySection } from "./policy";
+import { vaultSection } from "./vault";
+import { activitySection } from "./activity";
+import { documentsSection } from "./documents";
+import { feedback, hint, section, setDot, statusDot, toggle } from "./ui";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -16,162 +22,46 @@ async function save() {
   await Bridge.saveSettings(settings);
 }
 
-// ── Reusable bits ─────────────────────────────────────────────────────────────
+// ── Browser extension ─────────────────────────────────────────────────────────
 
-function toggle(on: boolean, onChange: (v: boolean) => void): HTMLElement {
-  const el = h("button", { class: on ? "switch on" : "switch", "aria-pressed": on });
-  el.addEventListener("click", () => {
-    const next = !el.classList.contains("on");
-    el.classList.toggle("on", next);
-    onChange(next);
-  });
+function browserSection(status: ProtectionStatus | null): HTMLElement {
+  const { el, head } = section("browser", "Browser extension");
+  const dot = statusDot(status?.extensionConnected ? "ok" : "off");
+  head.prepend(dot);
+  const line = h("span", { class: "hint" });
+  const paint = (p: ProtectionStatus | null) => {
+    const on = !!p?.extensionConnected;
+    setDot(dot, on ? "ok" : "off");
+    line.textContent = on
+      ? "Connected — the extension checked in during the last minute."
+      : "Not connected. Install it once, keep Zuko running, and it connects by itself.";
+  };
+  paint(status);
+  void onEvent("protection-changed", paint);
+
+  const copy = (text: string) => {
+    const b = h("button", { class: "small", text: "Copy" });
+    b.addEventListener("click", async () => {
+      b.textContent = (await copyText(text)) ? "Copied" : "Copy failed";
+      window.setTimeout(() => (b.textContent = "Copy"), 1400);
+    });
+    return b;
+  };
+
+  el.append(
+    line,
+    hint("Masks your prompts on ChatGPT, claude.ai and DeepSeek before they are sent, restores the answers on screen, and sanitizes uploaded files."),
+    h("ol", { class: "steps" },
+      h("li", {}, "Open ", h("code", { text: "chrome://extensions" }), " (or ", h("code", { text: "edge://extensions" }), ") ", copy("chrome://extensions")),
+      h("li", { text: "Turn on Developer mode (top right)." }),
+      h("li", {}, "Click ", h("b", { text: "Load unpacked" }), " and pick the ", h("code", { text: "extension/dist" }), " folder of the Zuko repository."),
+      h("li", { text: "Pin Zuko to the toolbar. Its badge turns teal once it reaches this app." }),
+    ),
+  );
   return el;
 }
 
-function statusDot(ok: boolean): HTMLElement {
-  return h("i", { class: "dot", style: `background:${ok ? "#22c55e" : "#f4505e"}` });
-}
-
-function renderDiff(text: string): HTMLElement {
-  const box = h("div", { class: "diff" });
-  for (const line of text.split("\n")) {
-    const cls = line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "ctx";
-    box.append(h("div", { class: cls, text: line }));
-  }
-  return box;
-}
-
-// ── Claude Code section ───────────────────────────────────────────────────────
-
-function claudeSection(status: HookStatus): HTMLElement {
-  const body = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
-  const section = h(
-    "section",
-    {},
-    h("h2", {}, statusDot(status.installed), h("span", { text: "Claude Code" })),
-    body,
-  );
-
-  const rebuild = async () => {
-    const fresh = await Bridge.hooksStatus();
-    if (fresh) Object.assign(status, fresh);
-    clear(body);
-    draw();
-    const head = section.querySelector("h2")!;
-    clear(head);
-    head.append(statusDot(status.installed), h("span", { text: "Claude Code" }));
-  };
-
-  function draw() {
-    body.append(
-      h("div", {
-        class: "hint",
-        text: status.installed
-          ? "Zuko is hooked into your Claude Code sessions. Tool calls, questions and permission requests show up in the island, and you can answer them there."
-          : "Install the hooks to see your Claude Code sessions in the island and approve permissions without leaving what you are doing.",
-      }),
-      h("div", { class: "row" },
-        h("label", { text: "settings.json" }),
-        h("span", { class: "path", text: status.settingsPath }),
-      ),
-      h("div", { class: "row" },
-        h("label", { text: "Relay" }),
-        h("span", { class: "path", text: status.hookPath }),
-        statusDot(status.hookReady),
-      ),
-    );
-
-    if (!status.hookReady) {
-      body.append(h("div", {
-        class: "notice warn",
-        text: "zuko-hook.exe is not in place yet. Restart Zuko; if it still fails, build it with `cargo build -p zuko-hook`.",
-      }));
-    }
-
-    const actions = h("div", { class: "row" });
-    const install = h("button", {
-      class: "primary",
-      text: status.installed ? "Reinstall hooks…" : "Install hooks…",
-      onclick: () => showPreview(true),
-    });
-    // Writing hook commands that point at a relay which isn't there would give
-    // every Claude Code session a broken hook and nothing to show for it.
-    if (!status.hookReady) {
-      install.disabled = true;
-      install.title = "The relay isn't installed yet.";
-    }
-    actions.append(install);
-    if (status.installed) {
-      actions.append(h("button", {
-        class: "danger",
-        text: "Uninstall hooks…",
-        onclick: () => showPreview(false),
-      }));
-    }
-    body.append(actions);
-  }
-
-  async function showPreview(install: boolean) {
-    let preview;
-    try {
-      preview = await Bridge.hooksPreview(install);
-    } catch (err) {
-      // An unreadable or invalid settings.json stops here rather than being
-      // treated as empty and written over.
-      clear(body);
-      body.append(
-        h("div", { class: "notice err", text: String(err).replace(/^Error:\s*/, "") }),
-        h("div", { class: "row" }, h("button", {
-          text: "Back",
-          onclick: () => { clear(body); draw(); },
-        })),
-      );
-      return;
-    }
-    if (!preview) return;
-    clear(body);
-    body.append(
-      h("div", {
-        class: "hint",
-        text: install
-          ? "This is exactly what will change in your settings.json. Your own hooks are left untouched."
-          : "This removes Zuko's entries only. Your own hooks are left untouched.",
-      }),
-      renderDiff(preview.diff),
-      h("div", { class: "row" },
-        h("span", { class: "path", text: `Backup → ${preview.backup}` }),
-      ),
-    );
-    const confirm = h("button", {
-      class: install ? "primary" : "danger",
-      text: install ? "Back up and write" : "Back up and remove",
-    });
-    confirm.addEventListener("click", async () => {
-      confirm.disabled = true;
-      try {
-        const backup = await Bridge.hooksApply(install, preview.fingerprint);
-        clear(body);
-        body.append(h("div", {
-          class: "notice ok",
-          text: `Done. Previous settings saved as ${backup}. Open a new Claude Code session to pick the hooks up.`,
-        }));
-        window.setTimeout(() => void rebuild(), 2600);
-      } catch (err) {
-        confirm.disabled = false;
-        body.append(h("div", { class: "notice err", text: `Could not write: ${String(err)}` }));
-      }
-    });
-    body.append(h("div", { class: "row" }, confirm, h("button", {
-      text: "Cancel",
-      onclick: () => { clear(body); draw(); },
-    })));
-  }
-
-  draw();
-  return section;
-}
-
-// ── Claude API section ────────────────────────────────────────────────────────
+// ── Claude API key ────────────────────────────────────────────────────────────
 
 const MODELS: [string, string][] = [
   ["claude-opus-5", "Claude Opus 5"],
@@ -180,12 +70,13 @@ const MODELS: [string, string][] = [
 ];
 
 function apiSection(hasKey: boolean): HTMLElement {
+  const { el, head } = section("claude", "Claude API key");
   const dot = statusDot(hasKey);
-  const state = h("span", { class: "hint", text: hasKey ? "Key saved in the Windows Credential Manager." : "No key yet — the chat needs one." });
+  head.prepend(dot);
+  const state = h("span", { class: "hint" });
 
   const field = h("input", {
     type: "password",
-    placeholder: hasKey ? "••••••••••••  (stored)" : "sk-ant-...",
     style: "flex:1 1 auto;min-width:0",
     autocomplete: "off",
     spellcheck: "false",
@@ -193,40 +84,41 @@ function apiSection(hasKey: boolean): HTMLElement {
 
   const saveBtn = h("button", { class: "primary", text: "Save key" });
   const clearBtn = h("button", { class: "danger", text: "Remove" });
-  const feedback = h("div", {});
+  const fb = feedback();
 
-  async function refresh() {
-    const present = (await Bridge.secretPresent("anthropic-api-key")) ?? false;
-    dot.style.background = present ? "#22c55e" : "#f4505e";
+  function paint(present: boolean) {
+    setDot(dot, present);
     state.textContent = present
-      ? "Key saved in the Windows Credential Manager."
-      : "No key yet — the chat needs one.";
+      ? "Used by the island's chat. Stored in the Windows Credential Manager, never on disk."
+      : "Only the island's chat needs one. Claude Code keeps using its own login.";
     field.placeholder = present ? "••••••••••••  (stored)" : "sk-ant-...";
     clearBtn.style.display = present ? "" : "none";
+  }
+
+  async function refresh() {
+    paint((await Bridge.secretPresent("anthropic-api-key")) ?? false);
   }
 
   saveBtn.addEventListener("click", async () => {
     const value = field.value.trim();
     if (!value) return;
-    clear(feedback);
     try {
       await Bridge.secretSet("anthropic-api-key", value);
       field.value = "";
-      feedback.append(h("div", { class: "notice ok", text: "Saved. It never touches disk." }));
+      fb.show("ok", "Saved.");
       await refresh();
     } catch (err) {
-      feedback.append(h("div", { class: "notice err", text: `Could not save: ${String(err)}` }));
+      fb.error(err, "Couldn't save");
     }
   });
 
   clearBtn.addEventListener("click", async () => {
-    clear(feedback);
     try {
       await Bridge.secretClear("anthropic-api-key");
-      feedback.append(h("div", { class: "notice ok", text: "Key removed." }));
+      fb.show("ok", "Key removed.");
       await refresh();
     } catch (err) {
-      feedback.append(h("div", { class: "notice err", text: `Could not remove: ${String(err)}` }));
+      fb.error(err, "Couldn't remove");
     }
   });
 
@@ -241,126 +133,20 @@ function apiSection(hasKey: boolean): HTMLElement {
     void save();
   });
 
-  clearBtn.style.display = hasKey ? "" : "none";
-
-  return h(
-    "section",
-    {},
-    h("h2", {}, dot, h("span", { text: "Claude" })),
+  paint(hasKey);
+  el.append(
     state,
     h("div", { class: "row" }, h("label", { text: "API key" }), field, saveBtn, clearBtn),
-    h("div", { class: "row" }, h("label", { text: "Model" }), model),
-    feedback,
+    h("div", { class: "row" }, h("label", { text: "Chat model" }), model),
+    fb.el,
   );
+  return el;
 }
 
-// ── Integrations section ──────────────────────────────────────────────────────
-
-interface IntegrationDef {
-  id: string;
-  name: string;
-  color: string;
-  /** Credential Manager keys, in the order they are shown. */
-  fields: { key: string; label: string; placeholder: string; secret: boolean }[];
-}
-
-const INTEGRATIONS: IntegrationDef[] = [
-  { id: "integration_stripe", name: "Stripe", color: "#0570DE",
-    fields: [{ key: "stripe-api-key", label: "Secret key", placeholder: "sk_live_…", secret: true }] },
-  { id: "integration_github", name: "GitHub", color: "#F4505E",
-    fields: [{ key: "github-token", label: "Token", placeholder: "ghp_…", secret: true }] },
-  { id: "integration_vercel", name: "Vercel", color: "#7C5CFF",
-    fields: [{ key: "vercel-token", label: "Token", placeholder: "…", secret: true }] },
-  { id: "integration_n8n", name: "n8n", color: "#F29B38",
-    fields: [
-      { key: "n8n-url", label: "Instance URL", placeholder: "https://n8n.example.com", secret: false },
-      { key: "n8n-api-key", label: "API key", placeholder: "…", secret: true },
-    ] },
-  { id: "integration_resend", name: "Resend", color: "#22C55E",
-    fields: [{ key: "resend-api-key", label: "API key", placeholder: "re_…", secret: true }] },
-  { id: "integration_notion", name: "Notion", color: "#8C8C8C",
-    fields: [{ key: "notion-api-key", label: "Integration token", placeholder: "ntn_…", secret: true }] },
-  { id: "integration_calcom", name: "Cal.com", color: "#C9956A",
-    fields: [{ key: "calcom-api-key", label: "API key", placeholder: "cal_…", secret: true }] },
-];
-
-const MAX_ACTIVE = 4;
-
-function integrationsSection(present: Record<string, boolean>): HTMLElement {
-  const note = h("div", { class: "hint" });
-  const list = h("div", { style: "display:flex;flex-direction:column;gap:14px" });
-
-  function updateNote() {
-    const used = settings.activeIntegrations.length;
-    note.textContent = `Pick up to ${MAX_ACTIVE} pills to show next to Zuko — ${used}/${MAX_ACTIVE} in use. Keys are stored in the Windows Credential Manager, never on disk.`;
-  }
-
-  for (const def of INTEGRATIONS) {
-    const active = settings.activeIntegrations.includes(def.id);
-    const sw = h("button", { class: active ? "switch on" : "switch" });
-    sw.addEventListener("click", () => {
-      const on = settings.activeIntegrations.includes(def.id);
-      if (on) {
-        settings.activeIntegrations = settings.activeIntegrations.filter((x) => x !== def.id);
-      } else {
-        if (settings.activeIntegrations.length >= MAX_ACTIVE) return;
-        settings.activeIntegrations = [...settings.activeIntegrations, def.id];
-      }
-      sw.classList.toggle("on", !on);
-      updateNote();
-      void save();
-    });
-
-    const rows = h("div", { style: "display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0" });
-    for (const field of def.fields) {
-      const input = h("input", {
-        type: field.secret ? "password" : "text",
-        placeholder: present[field.key] ? "••••••••  (stored)" : field.placeholder,
-        autocomplete: "off",
-        spellcheck: "false",
-        style: "flex:1 1 auto;min-width:0",
-      }) as HTMLInputElement;
-      const saveBtn = h("button", { text: "Save" });
-      const dotEl = statusDot(present[field.key] ?? false);
-      saveBtn.addEventListener("click", async () => {
-        const value = input.value.trim();
-        try {
-          await Bridge.secretSet(field.key, value);
-          present[field.key] = value.length > 0;
-          input.value = "";
-          input.placeholder = value ? "••••••••  (stored)" : field.placeholder;
-          dotEl.style.background = value ? "#22c55e" : "#f4505e";
-        } catch {
-          dotEl.style.background = "#f5a524";
-        }
-      });
-      rows.append(
-        h("div", { class: "row" },
-          h("label", { style: "min-width:104px", text: field.label }),
-          input, saveBtn, dotEl,
-        ),
-      );
-    }
-
-    list.append(
-      h("div", { style: "display:flex;gap:12px;align-items:flex-start" },
-        h("div", { style: "display:flex;align-items:center;gap:8px;min-width:132px;padding-top:4px" },
-          sw,
-          h("i", { class: "dot", style: `background:${def.color}` }),
-          h("span", { style: "font-size:12.5px", text: def.name }),
-        ),
-        rows,
-      ),
-    );
-  }
-
-  updateNote();
-  return h("section", {}, h("h2", {}, h("span", { text: "Integrations" })), note, list);
-}
-
-// ── General section ───────────────────────────────────────────────────────────
+// ── General ───────────────────────────────────────────────────────────────────
 
 function generalSection(): HTMLElement {
+  const { el } = section("general", "General");
   const volume = h("input", {
     type: "range", min: "0", max: "0.2", step: "0.005",
     value: String(settings.soundVolume),
@@ -392,13 +178,10 @@ function generalSection(): HTMLElement {
     void save();
   });
 
-  return h(
-    "section",
-    {},
-    h("h2", {}, h("span", { text: "General" })),
+  el.append(
     h("div", { class: "row" },
       h("label", { text: "Sound" }),
-      toggle(settings.soundEnabled, (v) => { settings.soundEnabled = v; void save(); }),
+      toggle(settings.soundEnabled, (v) => { settings.soundEnabled = v; void save(); }, "Sound"),
       volume,
     ),
     h("div", { class: "row" },
@@ -412,9 +195,48 @@ function generalSection(): HTMLElement {
     ),
     h("div", { class: "row" },
       h("label", { text: "Launch at startup" }),
-      toggle(settings.autostart, (v) => { settings.autostart = v; void save(); }),
+      toggle(settings.autostart, (v) => { settings.autostart = v; void save(); }, "Launch at startup"),
     ),
   );
+  return el;
+}
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
+
+const SECTIONS: [id: string, label: string][] = [
+  ["protection", "Protection"],
+  ["policy", "Policy"],
+  ["vault", "Vault"],
+  ["activity", "Activity"],
+  ["documents", "Documents"],
+  ["browser", "Browser"],
+  ["claude", "Claude"],
+  ["general", "General"],
+];
+
+function nav(): HTMLElement {
+  const links = SECTIONS.map(([id, label]) =>
+    h("a", {
+      href: `#${id}`, "data-id": id, text: label,
+      onclick: (e: Event) => {
+        e.preventDefault();
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      },
+    }),
+  );
+  const el = h("nav", { class: "nav" }, ...links);
+  // Highlight the section under the nav as the page scrolls.
+  const mark = () => {
+    let current = SECTIONS[0][0];
+    for (const [id] of SECTIONS) {
+      const s = document.getElementById(id);
+      if (s && s.getBoundingClientRect().top < 120) current = id;
+    }
+    links.forEach((a) => a.classList.toggle("on", a.dataset.id === current));
+  };
+  window.addEventListener("scroll", mark, { passive: true });
+  window.setTimeout(mark, 0);
+  return el;
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -425,35 +247,43 @@ async function main() {
     settings = { ...settings, ...boot.settings };
     version = boot.version;
   }
-  const status = (await Bridge.hooksStatus()) ?? {
-    installed: false, settingsPath: "", hookPath: "", hookReady: false,
-  };
+  const [status, policy, vault, activity, hasKey] = await Promise.all([
+    Bridge.protectionStatus(),
+    Bridge.policyGet(),
+    Bridge.vaultList(),
+    Bridge.activityRecent(200),
+    Bridge.secretPresent("anthropic-api-key"),
+  ]);
 
-  const hasKey = (await Bridge.secretPresent("anthropic-api-key")) ?? false;
-
-  const keys = [
-    "stripe-api-key", "github-token", "vercel-token",
-    "n8n-url", "n8n-api-key", "resend-api-key", "notion-api-key", "calcom-api-key",
+  const sections = [
+    protectionSection(status),
+    policySection(policy),
+    vaultSection(vault),
+    activitySection(activity, status?.auditPath ?? ""),
+    documentsSection(),
+    browserSection(status),
+    apiSection(hasKey ?? false),
+    generalSection(),
   ];
-  const present: Record<string, boolean> = {};
-  for (const k of keys) present[k] = (await Bridge.secretPresent(k)) ?? false;
+  // Dev only: `?mock=1&only=vault,activity` renders just those (screenshots).
+  const only = IS_MOCK ? new URLSearchParams(window.location.search).get("only")?.split(",") : null;
 
   clear(root);
   root.append(
-    h("h1", {}, h("span", { text: "Zuko" }), h("span", { class: "version", text: version })),
-    claudeSection(status),
-    apiSection(hasKey),
-    integrationsSection(present),
-    generalSection(),
-    h("div", {
-      class: "hint",
-      text: "No telemetry. Network requests only go to the services you configure yourself.",
-    }),
+    h("header", { class: "top" },
+      h("h1", {}, h("span", { text: "Zuko" }), h("span", { class: "version", text: version ? `v${version}` : "" })),
+      nav()),
+    ...sections.filter((s) => !only || only.includes(s.id)),
+    hint("No telemetry. Zuko only talks to the Claude API, through your own login or key."),
   );
 
-  void onEvent<Settings>("settings-changed", (s) => {
+  void onEvent("settings-changed", (s) => {
     settings = { ...settings, ...s };
   });
+
+  if (window.location.hash) {
+    document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: "start" });
+  }
 }
 
 void main();
