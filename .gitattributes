@@ -1,2 +1,4 @@
-docs/** linguist-documentation
-design/** linguist-documentation
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.wasm binary
