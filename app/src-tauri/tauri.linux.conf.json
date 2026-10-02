@@ -8,7 +8,9 @@
     ],
     "resources": {
       "../target/release/zuko-hook.exe": null,
-      "../target/release/zuko-hook": "zuko-hook"
+      "../target/release/zuko-native-host.exe": null,
+      "../target/release/zuko-hook": "zuko-hook",
+      "../target/release/zuko-native-host": "zuko-native-host"
     },
     "linux": {
       "appimage": {

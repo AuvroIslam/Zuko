@@ -25,6 +25,9 @@ use super::{home_dir, LocalTime};
 /// File name of the Claude Code relay.
 pub const HOOK_EXE: &str = "zuko-hook";
 
+/// File name of the browser extension's native messaging host.
+pub const NATIVE_HOST_EXE: &str = "zuko-native-host";
+
 /// Environment variable holding the home directory.
 pub const HOME_VAR: &str = "HOME";
 
@@ -343,4 +346,9 @@ mod tests {
         assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// Executable of a connected peer process (from SO_PEERCRED's pid).
+pub fn peer_exe(pid: Option<i32>) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{}/exe", pid?)).ok()
 }

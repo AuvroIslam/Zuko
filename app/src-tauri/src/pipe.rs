@@ -106,8 +106,12 @@ pub fn start(app: AppHandle) {
                 }
             };
             let connected = std::mem::replace(&mut server, next);
+            let client = {
+                use std::os::windows::io::AsRawHandle;
+                classify(crate::platform::pipe_client_exe(connected.as_raw_handle()))
+            };
             let app = app.clone();
-            tauri::async_runtime::spawn(async move { handle(app, connected).await });
+            tauri::async_runtime::spawn(async move { handle(app, connected, client).await });
         }
     });
 }
@@ -155,8 +159,9 @@ pub fn start(app: AppHandle) {
                 log::line("refused a relay connection from another user");
                 continue;
             }
+            let client = classify(crate::platform::peer_exe(stream.peer_cred().ok().and_then(|c| c.pid())));
             let app = app.clone();
-            tauri::async_runtime::spawn(async move { handle(app, stream).await });
+            tauri::async_runtime::spawn(async move { handle(app, stream, client).await });
         }
     });
 }
@@ -178,7 +183,58 @@ impl Relay for NamedPipeServer {
 #[cfg(target_os = "linux")]
 impl Relay for tokio::net::UnixStream {}
 
-async fn handle(app: AppHandle, mut pipe: impl Relay) {
+/// Who is on the other end of a connection, judged by its executable.
+///
+/// The pipe is already restricted to the user's own account, but the AI agent runs
+/// commands as that same user. Without this check a script the agent writes could
+/// pose as the relay and send a crafted PreToolUse with `{{API_KEY_1}}` in it to get
+/// the real value back, or pose as the browser extension and ask for the vault.
+/// So hook events are only taken from Zuko's installed relay, and extension
+/// messages only from Zuko's installed native host — locations the firewall's
+/// SELF_PROTECT invariant forbids the agent to write to or run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Client {
+    Relay,
+    NativeHost,
+    Other(String),
+}
+
+fn classify(exe: Option<std::path::PathBuf>) -> Client {
+    let Some(exe) = exe else { return Client::Other("unknown process".into()) };
+    let name = exe.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let is = |expected: &std::path::Path| same_file(&exe, expected) || next_to_app(&exe);
+    let kind = if name == crate::platform::HOOK_EXE.to_lowercase() {
+        Some((Client::Relay, crate::settings::hook_exe_path()))
+    } else if name == crate::platform::NATIVE_HOST_EXE.to_lowercase() {
+        Some((Client::NativeHost, crate::settings::native_host_exe_path()))
+    } else {
+        None
+    };
+    match kind {
+        // Development and test builds run the binaries straight from target/.
+        Some((client, _)) if cfg!(debug_assertions) => client,
+        Some((client, installed)) if is(&installed) => client,
+        _ => Client::Other(exe.display().to_string()),
+    }
+}
+
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy()),
+        _ => false,
+    }
+}
+
+/// The installed app bundles the relay and the host next to its own executable.
+fn next_to_app(exe: &std::path::Path) -> bool {
+    let Ok(app) = std::env::current_exe() else { return false };
+    match (exe.parent(), app.parent()) {
+        (Some(a), Some(b)) => same_file(a, b),
+        _ => false,
+    }
+}
+
+async fn handle(app: AppHandle, mut pipe: impl Relay, client: Client) {
     let Some(payload) = read_request(&mut pipe).await else {
         pipe.finish();
         return;
@@ -188,6 +244,12 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    let expected = if event == "ZukoExtension" { Client::NativeHost } else { Client::Relay };
+    if client != expected {
+        log::line(format!("refused a {event} message from {client:?} (expected {expected:?})"));
+        pipe.finish();
+        return;
+    }
     let wants_reply = payload.get("zuko_wants_reply").and_then(Value::as_bool).unwrap_or(false);
 
     match event.as_str() {
@@ -429,6 +491,18 @@ pub fn answer(app: &AppHandle, request_id: &str, decision: &str, elapsed_ms: Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_zuko_binaries_are_trusted_clients() {
+        use std::path::PathBuf;
+        // Test builds have debug assertions: the file name decides (binaries run
+        // from target/). Release builds also require the installed location.
+        assert_eq!(classify(Some(PathBuf::from("C:/x/zuko-hook.exe"))), Client::Relay);
+        assert_eq!(classify(Some(PathBuf::from("C:/x/ZUKO-NATIVE-HOST.EXE"))), Client::NativeHost);
+        assert!(matches!(classify(Some(PathBuf::from("C:/Python/python.exe"))), Client::Other(_)));
+        assert!(matches!(classify(Some(PathBuf::from("C:/x/zuko-hook.exe.bat"))), Client::Other(_)));
+        assert!(matches!(classify(None), Client::Other(_)));
+    }
 
     #[test]
     fn the_ui_copy_drops_the_tool_response_and_cuts_strings() {

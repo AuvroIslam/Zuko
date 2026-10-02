@@ -90,6 +90,11 @@ pub fn hook_exe_path() -> PathBuf {
     local_dir().join("bin").join(crate::platform::HOOK_EXE)
 }
 
+/// Where the browser extension's native host is installed (next to the relay).
+pub fn native_host_exe_path() -> PathBuf {
+    local_dir().join("bin").join(crate::platform::NATIVE_HOST_EXE)
+}
+
 fn settings_path() -> PathBuf {
     config_dir().join("settings.json")
 }

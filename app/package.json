@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "icons": "node scripts/gen-icons.mjs",
     "tauri": "tauri",
-    "predev": "cargo build --release -p zuko-hook",
-    "prebuild": "cargo build --release -p zuko-hook",
+    "predev": "cargo build --release -p zuko-hook -p zuko-native-host",
+    "prebuild": "cargo build --release -p zuko-hook -p zuko-native-host",
     "pack": "tauri build && node scripts/pack.mjs"
   },
   "devDependencies": {

@@ -64,7 +64,12 @@ function main() {
     process.exit(1);
   }
   const exeName = win ? "zuko-native-host.exe" : "zuko-native-host";
-  const exePath = resolve(value("--exe") ?? join(root, "..", "app", "target", "release", exeName));
+  // Zuko installs the host next to its relay, and only accepts extension messages
+  // from there; the build output is the fallback for development.
+  const installed = win
+    ? join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "Zuko", "bin", exeName)
+    : join(homedir(), ".local", "share", "zuko", "bin", exeName);
+  const exePath = resolve(value("--exe") ?? (existsSync(installed) ? installed : join(root, "..", "app", "target", "release", exeName)));
   const outDir = resolve(
     value("--out") ?? (win ? join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "Zuko", "native-host") : join(homedir(), ".local", "share", "zuko", "native-host")),
   );

@@ -831,7 +831,15 @@ fn write_like(temp: &Path, original: &Path, bytes: &[u8]) -> std::io::Result<()>
 /// the relay was simply never installed. It only looked healthy on a developer
 /// machine, where a leftover copy from `tauri dev` was already sitting in bin/.
 pub fn ensure_hook_exe(app: &AppHandle) {
-    let dest = settings::hook_exe_path();
+    ensure_binary(app, platform::HOOK_EXE, &settings::hook_exe_path());
+    // The browser extension's native host lives next to the relay: the pipe only
+    // accepts extension messages from that location (see pipe.rs `classify`).
+    ensure_binary(app, platform::NATIVE_HOST_EXE, &settings::native_host_exe_path());
+}
+
+/// Copies one of Zuko's helper executables into its private `bin` folder.
+fn ensure_binary(app: &AppHandle, exe_name: &str, dest: &Path) {
+    let dest = dest.to_path_buf();
     let Some(dir) = dest.parent() else { return };
     // Nobody else may swap the relay Claude Code runs: its folder is ours only.
     if platform::ensure_private_dir(&settings::local_dir()).is_err()
@@ -841,27 +849,23 @@ pub fn ensure_hook_exe(app: &AppHandle) {
     }
 
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(p) = app.path().resolve(platform::HOOK_EXE, tauri::path::BaseDirectory::Resource) {
+    if let Ok(p) = app.path().resolve(exe_name, tauri::path::BaseDirectory::Resource) {
         candidates.push(p);
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             // Installed build, then `tauri dev` (target/debug) next to the
             // release hook the pre-build step produces.
-            candidates.push(parent.join(platform::HOOK_EXE));
-            candidates.push(parent.join("../release").join(platform::HOOK_EXE));
+            candidates.push(parent.join(exe_name));
+            candidates.push(parent.join("../release").join(exe_name));
             // Belt and braces: where the old glob form used to land it.
-            candidates.push(parent.join("_up_/target/release").join(platform::HOOK_EXE));
+            candidates.push(parent.join("_up_/target/release").join(exe_name));
         }
     }
 
     let tried: Vec<String> = candidates.iter().map(|p| p.display().to_string()).collect();
     let Some(src) = candidates.into_iter().find(|p| p.exists()) else {
-        crate::log::line(format!(
-            "{} not found — Claude Code hooks cannot work. Looked in: {}",
-            platform::HOOK_EXE,
-            tried.join(", ")
-        ));
+        crate::log::line(format!("{} not found. Looked in: {}", exe_name, tried.join(", ")));
         return;
     };
     install_relay(&src, &dest);

@@ -48,7 +48,10 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "resources": { "../target/release/zuko-hook.exe": "zuko-hook.exe" },
+    "resources": {
+      "../target/release/zuko-hook.exe": "zuko-hook.exe",
+      "../target/release/zuko-native-host.exe": "zuko-native-host.exe"
+    },
     "copyright": "© 2026 AuvroIslam",
     "category": "DeveloperTool",
     "shortDescription": "Zuko lives at the top of your screen",

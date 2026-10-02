@@ -12,7 +12,11 @@ use ::windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use ::windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
 use ::windows::Win32::System::Ole::RevokeDragDrop;
 use ::windows::Win32::System::SystemInformation::GetLocalTime;
-use ::windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use ::windows::Win32::System::Pipes::GetNamedPipeClientProcessId;
+use ::windows::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
+    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use ::windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, GetClassNameW, GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW,
@@ -24,6 +28,9 @@ use crate::island::WINDOW_LABEL;
 
 /// File name of the Claude Code relay.
 pub const HOOK_EXE: &str = "zuko-hook.exe";
+
+/// File name of the browser extension's native messaging host.
+pub const NATIVE_HOST_EXE: &str = "zuko-native-host.exe";
 
 /// Environment variable holding the home directory.
 pub const HOME_VAR: &str = "USERPROFILE";
@@ -240,3 +247,22 @@ pub fn set_activating(win: &WebviewWindow, activating: bool) {
 
 /// Click-through here is the poll's WS_EX_TRANSPARENT toggle, not a region.
 pub fn set_input_region(_win: &WebviewWindow, _rect: Option<(f64, f64, f64, f64)>) {}
+
+/// Full path of the executable on the other end of a connected pipe instance, or
+/// None if Windows will not say. Used to accept hook events only from Zuko's own
+/// relay and extension messages only from Zuko's own native host.
+pub fn pipe_client_exe(pipe: std::os::windows::io::RawHandle) -> Option<PathBuf> {
+    let mut pid = 0u32;
+    // SAFETY: `pipe` is a live, connected pipe instance owned by the caller.
+    unsafe { GetNamedPipeClientProcessId(HANDLE(pipe as _), &mut pid) }.ok()?;
+    // SAFETY: plain query on a process we only read the image name of.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+    let mut buf = vec![0u16; 32_768];
+    let mut len = buf.len() as u32;
+    let ok = unsafe { QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len) };
+    unsafe {
+        let _ = CloseHandle(process);
+    }
+    ok.ok()?;
+    Some(PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])))
+}
