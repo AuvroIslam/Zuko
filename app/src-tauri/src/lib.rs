@@ -220,8 +220,8 @@ fn hooks_apply(
 }
 
 #[tauri::command]
-fn approval_decision(app: AppHandle, request_id: String, decision: String) {
-    pipe::answer(&app, &request_id, &decision);
+fn approval_decision(app: AppHandle, request_id: String, decision: String, elapsed_ms: Option<u64>) {
+    pipe::answer(&app, &request_id, &decision, elapsed_ms);
 }
 
 /// The island has the card on screen, so the long wait for a human may begin.
@@ -350,6 +350,12 @@ pub fn show_settings_window(app: &AppHandle) {
 #[tauri::command]
 fn open_settings_window(app: AppHandle) {
     show_settings_window(&app);
+}
+
+/// Headless gateway for development and end-to-end tests (`cargo run --bin
+/// zuko-gateway`): the proxy with an in-memory engine, no UI.
+pub fn gateway_dev_main() {
+    gateway::dev_main();
 }
 
 pub fn run() {

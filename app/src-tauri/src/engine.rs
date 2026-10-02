@@ -87,6 +87,23 @@ fn protected_paths(home: &str) -> Vec<String> {
 }
 
 impl Engine {
+    /// An engine from explicit parts (tests, the headless gateway).
+    pub fn with_parts(policy: Policy, vault: Vault, base: CtxBase) -> Engine {
+        let detector = Detector::new(&policy.privacy.detector);
+        Engine {
+            policy: RwLock::new(Arc::new(policy)),
+            detector: RwLock::new(Arc::new(detector)),
+            vault: Mutex::new(vault),
+            ledgers: Mutex::new(HashMap::new()),
+            base,
+            stats: Stats::default(),
+        }
+    }
+
+    pub fn base(&self) -> &CtxBase {
+        &self.base
+    }
+
     /// Loads the policy and vault from disk (defaults when missing or unreadable).
     pub fn load() -> Engine {
         let policy = policystore::load();

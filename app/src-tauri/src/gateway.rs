@@ -55,3 +55,10 @@ pub fn base_url() -> String {
 pub fn set_upstream(url: &str) {
     let _ = url;
 }
+
+/// Runs the gateway without the UI, with an in-memory engine (default policy, empty
+/// vault), on the configured port; prints the base URL and logs each masked request
+/// (keys only) to stderr. Blocks until Ctrl+C. For development and E2E tests.
+pub fn dev_main() {
+    eprintln!("zuko-gateway: not implemented yet");
+}

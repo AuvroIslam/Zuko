@@ -5,6 +5,7 @@ authors = ["AuvroIslam"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+default-run = "zuko"
 
 [lib]
 name = "zuko_lib"
