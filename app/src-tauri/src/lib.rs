@@ -508,6 +508,7 @@ pub fn run() {
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             gateway::start(handle.clone());
+            localai::warm_up(&handle);
             Ok(())
         })
         .build(tauri::generate_context!())

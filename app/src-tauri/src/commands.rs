@@ -210,6 +210,7 @@ pub fn policy_set(app: AppHandle, engine: State<Engine>, policy: Policy) -> Resu
     engine.set_policy(policy)?;
     audit_note(&engine, "Policy", "policy.json", "Policy updated", "info", Vec::new());
     events::protection_changed(&app);
+    localai::warm_up(&app);
     Ok(())
 }
 

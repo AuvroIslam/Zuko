@@ -8,8 +8,8 @@
 
 import type {
   ActivityItem, AuditVerifyResult, BootInfo, BridgeEventName, EntryView, EventMap, HookPreview,
-  HookStatus, InstallOptions, MaskTextResult, Policy, PrivacyEvent, ProtectionStatus,
-  SanitizeResult, Tier, UnmaskTextResult, ZukoHookInfo,
+  HookStatus, InstallOptions, LocalAiConfig, LocalAiStatus, LocalAiTest, MaskTextResult, Policy,
+  PrivacyEvent, ProtectionStatus, SanitizeResult, Tier, UnmaskTextResult, ZukoHookInfo,
 } from "../src/core/bridge";
 import type { Island } from "../src/island/island";
 import { DEFAULT_SETTINGS, GATEWAY_ID, POLICY_ID, State } from "../src/core/state";
@@ -71,6 +71,11 @@ function defaultPolicy(): Policy {
       blockSecretPromptsWithoutGateway: true,
       maskToolOutput: true,
       secretHosts: {},
+    },
+    localAi: {
+      enabled: false, endpoint: "http://127.0.0.1:11434", model: "gemma3:4b",
+      deepScanPrompts: true, deepScanDocuments: true, explainRisk: true,
+      waitForPromptScan: false, timeoutMs: 8000,
     },
   };
 }
@@ -261,6 +266,28 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     policy = defaultPolicy();
     return structuredClone(policy);
   },
+  localai_status: (a): LocalAiStatus => {
+    const c = (a.config as LocalAiConfig | null) ?? policy.localAi;
+    const loopback = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\/?$/i.test(c.endpoint.trim());
+    const models = ["gemma3:4b", "llama3.2:3b"];
+    const present = models.includes(c.model);
+    return {
+      enabled: c.enabled, endpoint: c.endpoint, model: c.model, endpointOk: loopback, reachable: loopback,
+      modelPresent: loopback && present, models: loopback ? models : [],
+      error: !loopback ? "Local AI endpoint must be http://127.0.0.1, http://localhost or http://[::1]." : present ? null : `The model ${c.model} is not installed.`,
+      hint: loopback && !present ? `ollama pull ${c.model}` : null,
+    };
+  },
+  localai_test: (): LocalAiTest => ({
+    sample: "Hi, please send the signed lease to Tahmina Akter at 42 Lakeview Road, Gulshan 2, Dhaka 1212 before Friday. Thanks, Arif Hossain",
+    findings: [
+      { kind: "NAME", value: "Tahmina Akter", label: "Person name" },
+      { kind: "ADDRESS", value: "42 Lakeview Road, Gulshan 2, Dhaka 1212", label: "Street address" },
+      { kind: "NAME", value: "Arif Hossain", label: "Person name" },
+    ],
+    ms: 4210,
+    error: null,
+  }),
   vault_list: () => vault.map(({ value: _v, ...view }) => view),
   vault_add: (a) => {
     const kind = String(a.kind || "SECRET");
@@ -311,6 +338,9 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
         "| Item | Qty | Price |\n|---|---|---|\n| Hosting (March) | 1 | $240.00 |\n| Support hours | 6 | $480.00 |\n\n" +
         "Paid with {{CARD_1}} on 2026-03-31. Questions: {{EMAIL_1}}.",
       warnings: pdf ? ["Page 3 has no text layer (scanned?) and was skipped."] : [],
+      aiDeepScan: policy.localAi.enabled
+        ? { items: 2, newItems: 2, model: policy.localAi.model, ms: 5120, error: null }
+        : null,
     };
   },
   clipboard_mask: () => ({ count: 2 }),
@@ -318,7 +348,7 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
 };
 
 export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
-  await delay(cmd === "sanitize_file" ? 450 : cmd === "audit_verify" ? 600 : 25);
+  await delay(cmd === "sanitize_file" ? 450 : cmd === "audit_verify" ? 600 : cmd === "localai_test" ? 900 : 25);
   const fn = handlers[cmd];
   if (!fn) return null as T; // window plumbing: set_island_rect, focus_window…
   return fn(args) as T;

@@ -157,6 +157,8 @@ export function registerZukoHandlers(island: Island) {
     if (fresh && item.verdict === "deny" && !State.paused) island.fireBlock();
   });
   void onEvent("protection-changed", (status) => State.setProtection(status));
+  // The local AI's explanation of a card or a feed item, whenever it is ready.
+  void onEvent("ai-explain", (e) => State.applyExplanation(e));
   void onEvent("privacy", (event) => handlePrivacy(island, event));
 }
 
@@ -375,6 +377,7 @@ function handleHook(island: Island, payload: HookEventPayload) {
         command: approvalTarget(tool, input),
         zuko: payload.zuko ?? null,
         receivedAt: performance.now(),
+        aiExplanation: null,
       };
       // The relay's short ack window closes in 800 ms; everything below this
       // line is synchronous, so the card really is up by the time it lands.

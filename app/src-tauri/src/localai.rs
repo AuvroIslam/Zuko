@@ -565,6 +565,24 @@ pub fn spawn(app: &AppHandle, job: AiJob) {
     });
 }
 
+/// Asks Ollama to load the model now (an empty `/api/generate` with keep_alive), so
+/// the first real scan does not also pay for loading it. Background, best effort,
+/// only when the local AI is enabled.
+pub fn warm_up(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(engine) = app.try_state::<Engine>() else { return };
+        let cfg = engine.policy().local_ai.clone();
+        if !cfg.enabled {
+            return;
+        }
+        let Ok(base) = LocalAi::base(&cfg) else { return };
+        let body = json!({ "model": cfg.model.trim(), "keep_alive": KEEP_ALIVE });
+        let ai = engine.localai();
+        let _ = tokio::time::timeout(Duration::from_secs(60), ai.client.post(format!("{base}/api/generate")).json(&body).send()).await;
+    });
+}
+
 /// Pushes an explanation to every window and remembers it on the feed item.
 pub fn deliver_explanation(app: &AppHandle, ex: AiExplain) {
     if let Some(id) = &ex.activity_id {

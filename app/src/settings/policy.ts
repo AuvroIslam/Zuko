@@ -93,6 +93,9 @@ export function policySection(initial: Policy | null): HTMLElement {
   save.addEventListener("click", async () => {
     save.disabled = true;
     try {
+      // `localAi` is edited in its own section: keep whatever is saved there now.
+      const current = await Bridge.policyGet();
+      if (current) draft.localAi = current.localAi;
       await Bridge.policySet(draft);
       saved = structuredClone(draft);
       fb.show("ok", "Saved. Applies from the next tool call.");

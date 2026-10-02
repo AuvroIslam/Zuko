@@ -1346,6 +1346,24 @@ input[type="range"]::-webkit-slider-thumb {
   color: #93c5fd;
 }
 
+/* Local AI explanation: two lines at most, visibly labelled as the AI's words. */
+.appr-ai {
+  font: 400 11px/1.4 var(--font);
+  color: #aeb7c6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-height: 31px;
+}
+
+.appr-ai i {
+  font-style: normal;
+  font-weight: 600;
+  color: #93c5fd;
+  margin-right: 6px;
+}
+
 .appr-note {
   font: 500 11.5px var(--font);
   border-radius: 8px;

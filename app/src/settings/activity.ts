@@ -40,6 +40,9 @@ export function activitySection(initial: ActivityItem[] | null, auditPath: strin
         svg(v.icon, 9, v.stroke ? { stroke: 3 } : {}), h("span", { text: v.label })),
       h("div", { class: "act-main" },
         h("div", { class: "act-text", text: activityText(a) }),
+        a.aiExplanation
+          ? h("div", { class: "act-ai" }, h("i", { text: "AI explanation" }), h("span", { text: a.aiExplanation }))
+          : null,
         h("div", { class: "act-meta" },
           v.group !== "privacy" ? h("i", { class: "dot", style: `width:6px;height:6px;background:${tierColor(a.tier)}` }) : null,
           v.group !== "privacy" ? h("span", { text: `${a.tier} ${a.score}` }) : null,
@@ -100,6 +103,13 @@ export function activitySection(initial: ActivityItem[] | null, auditPath: strin
   void onEvent("activity", (a) => {
     if (items.some((x) => x.id === a.id)) return;
     items = [a, ...items].slice(0, LIMIT);
+    render();
+  });
+  // A local AI explanation for an item already listed (display only).
+  void onEvent("ai-explain", (e) => {
+    const item = e.activityId ? items.find((x) => x.id === e.activityId) : undefined;
+    if (!item) return;
+    item.aiExplanation = e.text;
     render();
   });
 
