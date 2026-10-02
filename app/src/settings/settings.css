@@ -944,3 +944,17 @@ ol.steps button.small {
   padding: 2px 8px;
   font-size: 11px;
 }
+
+.table .what .lbl {
+  color: #c9ccd2;
+}
+
+.table code.preview {
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.table td.actions button {
+  padding: 3px 9px;
+  font-size: 11px;
+}

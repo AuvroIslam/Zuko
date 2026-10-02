@@ -18,8 +18,8 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
   const tbody = h("tbody");
   const table = h("table", { class: "table vault" },
     h("thead", {}, h("tr", {},
-      h("th", { text: "Placeholder" }), h("th", { text: "What" }), h("th", { text: "Preview" }),
-      h("th", { text: "Source" }), h("th", { class: "num", text: "Hits" }), h("th", { text: "Last used" }), h("th"))),
+      h("th", { text: "Placeholder · label" }), h("th", { text: "Preview" }),
+      h("th", { text: "Source" }), h("th", { class: "num", text: "Hits" }), h("th", { text: "Used" }), h("th"))),
     tbody);
   const empty = hint("Nothing in the vault yet. Values appear here the first time Zuko masks them.");
   const fb = feedback();
@@ -88,10 +88,11 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
     });
 
     return h("tr", {},
-      h("td", {}, h("code", { class: "ph", text: placeholder(e.key) })),
-      h("td", { class: "what" }, h("div", { text: e.label }), e.hint ? h("div", { class: "hint", text: e.hint }) : null),
+      h("td", { class: "what" },
+        h("code", { class: "ph", text: placeholder(e.key) }),
+        h("div", { class: "hint" }, h("span", { class: "lbl", text: e.label }), e.hint ? ` · ${e.hint}` : "")),
       h("td", {}, preview),
-      h("td", { class: "dim", text: privacySourceLabel(e.source === "manual" ? "Added" : e.source) }),
+      h("td", { class: "dim nowrap", text: privacySourceLabel(e.source === "manual" ? "Added" : e.source) }),
       h("td", { class: "num", text: String(e.hits) }),
       h("td", { class: "dim nowrap", text: relTime(e.lastUsed * 1000) }),
       h("td", { class: "actions" }, reveal, forget),
@@ -110,10 +111,10 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
   });
 
   // Add a value by hand: it is masked from now on, everywhere.
-  const value = h("input", { type: "password", placeholder: "Value to protect", autocomplete: "off", spellcheck: "false", style: "flex:1 1 180px;min-width:0" }) as HTMLInputElement;
+  const value = h("input", { type: "password", placeholder: "Value to protect", autocomplete: "off", spellcheck: "false", style: "flex:1 1 130px;min-width:0" }) as HTMLInputElement;
   let kind = "SECRET";
   const kindSelect = select(VAULT_KINDS.map((k) => [k, k] as [string, string]), kind, (v) => { kind = v; });
-  const label = h("input", { type: "text", placeholder: "Label (optional)", style: "flex:1 1 120px;min-width:0" }) as HTMLInputElement;
+  const label = h("input", { type: "text", placeholder: "Label (optional)", style: "flex:1 1 90px;min-width:0" }) as HTMLInputElement;
   const add = h("button", { class: "primary", text: "Add value" });
   add.addEventListener("click", async () => {
     const v = value.value;

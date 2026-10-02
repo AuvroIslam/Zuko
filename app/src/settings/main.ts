@@ -3,7 +3,7 @@
 // Activity, Documents, Browser, Claude and General.
 
 import "./settings.css";
-import { Bridge, onEvent, type ProtectionStatus } from "../core/bridge";
+import { Bridge, IS_MOCK, onEvent, type ProtectionStatus } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear, copyText } from "../views/dom";
 import { protectionSection } from "./protection";
@@ -255,11 +255,7 @@ async function main() {
     Bridge.secretPresent("anthropic-api-key"),
   ]);
 
-  clear(root);
-  root.append(
-    h("header", { class: "top" },
-      h("h1", {}, h("span", { text: "Zuko" }), h("span", { class: "version", text: version ? `v${version}` : "" })),
-      nav()),
+  const sections = [
     protectionSection(status),
     policySection(policy),
     vaultSection(vault),
@@ -268,6 +264,16 @@ async function main() {
     browserSection(status),
     apiSection(hasKey ?? false),
     generalSection(),
+  ];
+  // Dev only: `?mock=1&only=vault,activity` renders just those (screenshots).
+  const only = IS_MOCK ? new URLSearchParams(window.location.search).get("only")?.split(",") : null;
+
+  clear(root);
+  root.append(
+    h("header", { class: "top" },
+      h("h1", {}, h("span", { text: "Zuko" }), h("span", { class: "version", text: version ? `v${version}` : "" })),
+      nav()),
+    ...sections.filter((s) => !only || only.includes(s.id)),
     hint("No telemetry. Zuko only talks to the Claude API, through your own login or key."),
   );
 
