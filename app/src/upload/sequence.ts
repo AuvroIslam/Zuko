@@ -1,5 +1,9 @@
 // The drop choreography — port of UploadSequenceEngine.swift, itself a port of
-// design/prototype/upload-sequence.html.
+// design/prototype/upload-sequence.html. Zuko does not eat the file: it stands
+// beside it while you drag, and once dropped the file settles in front of its
+// visor, a beam sweeps it top to bottom and a shield-check badge pops on it.
+// The phase timestamps are unchanged (the T_SUCK_* / T_CHEW_* names are kept
+// for the island and the canvas; they now bound the scan and the badge).
 //
 // The engine is pure arithmetic: it owns no DOM and draws nothing. It takes the
 // cursor and a drop time, and hands `frame()` back everything the canvas needs
@@ -30,6 +34,8 @@ export const USC = {
   CHOOSE_D: 62,
   LOCK_IN: 60,
   LOCK_OUT: 90,
+  /** Zuko stands this far left of the file so its visor can see it. */
+  SIDE: 66,
   MOUTH_AJAR: 0.2,
   MOUTH_OPEN: 0.42,
   MOUTH_MAX: 0.5,
@@ -113,7 +119,7 @@ class USSpring {
 
 // ── Frame ───────────────────────────────────────────────────────────────────
 
-export type UploadEyeShape = "pill" | "cup" | "content";
+export type UploadEyeShape = "pill" | "cup" | "content" | "wide";
 
 export interface MouthRect {
   x: number;
@@ -154,6 +160,20 @@ export interface UploadFrame {
   progEnd: number;
   growStart: number;
   growEnd: number;
+  /** Phase clock: `t`, held just before the drop while still dragging. */
+  pt: number;
+  dropped: boolean;
+  /** Scan beam sweep over the file, 0 (top) … 1 (bottom); 0 before the drop. */
+  scan: number;
+  /** Beam strength, 0…1 (a faint preview while dragging close by). */
+  beam: number;
+  /** Shield-check badge on the file, 0…~1.1 (back-eased pop). */
+  badge: number;
+  /** Where the file is drawn (centre), its scale and opacity. */
+  docX: number;
+  docY: number;
+  docScale: number;
+  docAlpha: number;
 }
 
 function restFrame(): UploadFrame {
@@ -189,6 +209,15 @@ function restFrame(): UploadFrame {
     progEnd: USC.T_PROG_START + 2.4,
     growStart: USC.T_PROG_START + 2.4 + 0.25,
     growEnd: USC.T_PROG_START + 2.4 + 0.7,
+    pt: 0,
+    dropped: false,
+    scan: 0,
+    beam: 0,
+    badge: 0,
+    docX: 600,
+    docY: 294,
+    docScale: 1,
+    docAlpha: 0.92,
   };
 }
 
@@ -339,15 +368,16 @@ class UploadSequence {
   private stepOnce(dt: number) {
     const isDragging = this.dropWall == null;
 
-    // Horizontal follow and lock, only while dragging inside the zone.
+    // Horizontal follow and lock, only while dragging inside the zone. Zuko
+    // keeps SIDE points to the left of the file so it can look at it.
     if (isDragging && this.entered >= 0) {
-      const dist = Math.hypot(this.cursorX - this.bx.v, this.cursorY + 14 - this.by.v);
+      const dist = Math.hypot(this.cursorX - USC.SIDE - this.bx.v, this.cursorY + 14 - this.by.v);
       if (!this.locked && dist < USC.LOCK_IN && this.speed < 180) {
         this.locked = true;
         this.lockAt = this.t;
       }
       if (this.locked && dist > USC.LOCK_OUT) this.locked = false;
-      const tx = Math.max(USC.FOLLOW_MIN, Math.min(USC.FOLLOW_MAX, this.cursorX));
+      const tx = Math.max(USC.FOLLOW_MIN, Math.min(USC.FOLLOW_MAX - USC.SIDE, this.cursorX - USC.SIDE));
       const response = this.locked ? 0.18 : 0.35;
       const damping = this.locked ? 0.75 : 0.7;
       this.bx.step(tx, response, damping, dt);
@@ -390,6 +420,8 @@ class UploadSequence {
     // Clamp the phase clock to just before the drop while still dragging, so a
     // long hover never trips the post-drop visuals.
     const pt = isDragging ? Math.min(t, USC.T_DROP - USC.DT) : t;
+    f.pt = pt;
+    f.dropped = !isDragging;
 
     // Morph: 0→1 on entry, 1→0 shrinking to a ball, 0→1 growing back at choose.
     let morph: number;
@@ -476,25 +508,56 @@ class UploadSequence {
 
     f.mouth = this.mouth.v;
 
+    // The file: at the cursor while dragging; on the drop it settles in front
+    // of Zuko's visor, is scanned, gets its badge, then shrinks away as Zuko
+    // heads for the progress bar.
+    const scanX = this.bx.v + USC.SIDE;
+    const scanY = this.by.v - 4;
+    let docX = this.cursorX;
+    let docY = this.cursorY + 14;
+    let docScale = 1;
+    let docAlpha = 0.92;
+    if (!isDragging) {
+      const k = eOut(seg(pt, USC.T_DROP, USC.T_SUCK_START + 0.08));
+      docX = lerp(this.cursorX, scanX, k);
+      docY = lerp(this.cursorY + 14, scanY, k);
+      docAlpha = lerp(0.92, 1, k);
+      const out = eInOut(seg(pt, USC.T_CHEW_END, USC.T_SHRINK_END - 0.05));
+      docX = lerp(docX, x + 18, out);
+      docY = lerp(docY, y - 2, out);
+      docScale = lerp(1, 0.35, out);
+      docAlpha *= 1 - out;
+    }
+    f.docX = docX;
+    f.docY = docY;
+    f.docScale = docScale;
+    f.docAlpha = docAlpha;
+    f.scan = isDragging ? 0 : eInOut(seg(pt, USC.T_SUCK_START, USC.T_CHEW1 - 0.04));
+    f.beam = isDragging
+      ? (this.locked ? 0.45 : 0)
+      : seg(pt, USC.T_DROP, USC.T_SUCK_START) * (1 - seg(pt, USC.T_CHEW1, USC.T_CHEW1 + 0.15));
+    f.badge = isDragging ? 0 : eBack(seg(pt, USC.T_CHEW1, USC.T_CHEW1 + 0.25));
+
     // Eyes.
     let eye: UploadEyeShape = "pill";
-    if (this.locked && pt < USC.T_SUCK_END) eye = "cup";
-    if (pt >= USC.T_SUCK_END && pt < USC.T_CHEW_END + 0.1) eye = "content";
+    if (this.locked && isDragging) eye = "cup";
+    if (!isDragging && pt < USC.T_CHEW1) eye = "wide";
+    if (pt >= USC.T_CHEW1 + 0.05 && pt < USC.T_CHEW_END + 0.1) eye = "content";
     if (pt >= progEnd && pt < growEnd + 0.3) eye = "content";
     f.eye = eye;
 
-    const lkx = pt < USC.T_SUCK_END ? this.cursorX - x : pt < USC.T_PROG_START ? 0 : 40;
-    const lky = pt < USC.T_SUCK_END ? this.cursorY + 10 - y : 0;
-    f.lookX = Math.max(-1, Math.min(1, lkx / 200));
+    const lkx = pt < USC.T_CHEW_END ? docX - x : pt < USC.T_PROG_START ? 0 : 40;
+    const lky = pt < USC.T_CHEW_END ? docY - 4 - y : 0;
+    f.lookX = Math.max(-1, Math.min(1, lkx / 120));
     f.lookY = Math.max(-1, Math.min(1, lky / 150));
 
-    f.fileVisible = pt < USC.T_SUCK_END;
+    f.fileVisible = pt < USC.T_SHRINK_END;
     f.suck = seg(pt, USC.T_SUCK_START, USC.T_SUCK_END);
 
     // Content alphas.
     f.zoneOver = this.entered >= 0 && pt < USC.T_CHEW_END;
     f.zoneAlpha = 1 - seg(pt, USC.T_CHEW_END, USC.T_CHEW_END + 0.2);
-    f.textAlpha = f.zoneAlpha * (x > USC.TEXT_X - 40 && isDragging ? 0.25 : 1);
+    f.textAlpha = f.zoneAlpha * (x + USC.SIDE > USC.TEXT_X - 24 && isDragging ? 0.25 : 1);
     f.barReveal =
       eOut(seg(pt, USC.T_BAR_IN, USC.T_BAR_IN + 0.25)) * (1 - seg(pt, growStart, growStart + 0.2));
     f.barAlpha =

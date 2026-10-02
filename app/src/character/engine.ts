@@ -149,7 +149,7 @@ export const SHIELD = {
 } as const;
 
 /** Shield parameters at full `morph`: a rounded badge base, for the scan stance. */
-const SHIELD_BOXED = { taperX: 0.94, taperY: 0.6, tipHalf: 0.62, tipY: 0.86 } as const;
+const SHIELD_BOXED = { taperX: 0.86, taperY: 0.66, tipHalf: 0.34, tipY: 0.93 } as const;
 
 /**
  * Zuko's body outline, centred on the origin, `R` = half its width. `morph`
@@ -1296,7 +1296,8 @@ export class BotEngine {
 
   /** Drag-over scan stance: a bright bar sweeps the visor back and forth. */
   private drawScanner(x: CanvasRenderingContext2D, R: number, f: Face, t: number, px: number) {
-    const a = clamp(this.morph, 0, 1) * clamp(0.35 + this.slotH * 1.6, 0, 1);
+    const a = clamp(this.morph, 0, 1) * clamp(this.slotH * 2.4, 0, 1);
+    if (a < 0.01) return;
     const phase = t * 4.2;
     const sx = Math.sin(phase) * f.vhw * 0.82;
     const dir = Math.cos(phase) >= 0 ? 1 : -1;

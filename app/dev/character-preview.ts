@@ -156,15 +156,16 @@ if (want("greet")) {
 if (want("drop")) {
   const row = section("Drop → scan → upload (t from drop, s)");
   State.droppedFile = { name: "notes.md", path: "C:/tmp/notes.md" };
-  const S = 0.56;
-  const shots = new Set([-0.6, -0.1, 0.08, 0.2, 0.32, 0.45, 0.6, 0.78, 1.05, 1.3, 2.6, 4.0, 4.35]);
+  const S = Number(params.get("ds") ?? 0.56);
+  const dt = params.get("dt")?.split(",").map(Number);
+  const shots = dt ? new Set(dt) : new Set([-0.6, -0.1, 0.05, 0.2, 0.35, 0.5, 0.68, 0.85, 1.05, 1.2, 2.5, 3.8, 4.2, 4.6]);
   const grab = new Map<number, ReturnType<typeof UploadSeq.frame>>();
   // Walk the timeline in small steps (the sequence is a spring simulation).
   const T0 = 100;
   UploadSeq.clock = T0;
   UploadSeq.enterZone(520, 96);
   let dropped = false;
-  for (let k = 0; k <= 900; k++) {
+  for (let k = 0; k <= 960; k++) {
     const t = k / 120; // since entry
     UploadSeq.clock = T0 + t;
     if (!dropped) UploadSeq.updateCursor(520 - Math.min(1, t / 0.9) * 360, 96);
