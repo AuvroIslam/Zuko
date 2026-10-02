@@ -3,7 +3,7 @@
 
 import { h, svg, clear, copyText } from "../views/dom";
 import { ICONS } from "../views/icons";
-import { Bridge, IS_TAURI, onDragDrop, type SanitizeResult } from "../core/bridge";
+import { Bridge, IS_MOCK, IS_TAURI, onDragDrop, type SanitizeResult } from "../core/bridge";
 import { placeholder, plural } from "../views/format";
 import { feedback, hint, notice, section, sub } from "./ui";
 
@@ -171,5 +171,12 @@ export function documentsSection(): HTMLElement {
     report,
     tfb.el,
   );
+
+  // Dev only (`?mock=1&demo=1`): fill both tools so a screenshot shows results.
+  if (IS_MOCK && new URLSearchParams(window.location.search).has("demo")) {
+    void sanitize("C:\\Users\\dev\\Documents\\invoice-march.pdf");
+    input.value = "My key is sk-proj-Xk29fLm0aQ7rT1vB3nZ8yW4uE6iO2pS5dG9fQa, mail jamie.rahman@acme.io if it fails.";
+    mask.click();
+  }
   return el;
 }

@@ -4,7 +4,7 @@
 // with it.
 
 import { h, clear } from "../views/dom";
-import { Bridge, onEvent, type InstallOptions, type ProtectionStatus } from "../core/bridge";
+import { Bridge, IS_MOCK, onEvent, type InstallOptions, type ProtectionStatus } from "../core/bridge";
 import { fmtCount, maskGatewayUrl } from "../views/format";
 import { AMBER, feedback, hint, renderDiff, section, setDot, statusDot, tiles, toggle, type DotState } from "./ui";
 
@@ -133,7 +133,8 @@ export function protectionSection(initial: ProtectionStatus | null): HTMLElement
       hint(p.diff.trim()
         ? "Exactly what will change in your settings.json. Your own hooks and settings are left alone."
         : "Nothing to change — settings.json already matches."),
-      renderDiff(p.diff || "(no changes)"),
+      // The gateway URL carries its access token: never paint it.
+      renderDiff(p.diff.replace(/(\/t\/)[A-Za-z0-9_-]{6,}/g, "$1••••••") || "(no changes)"),
       h("div", { class: "row" }, h("span", { class: "path", text: `Backup → ${p.backup}` })),
       h("div", { class: "row" }, apply, cancel),
     );
@@ -141,6 +142,8 @@ export function protectionSection(initial: ProtectionStatus | null): HTMLElement
 
   renderStatus();
   draw();
+  // Dev only (`?mock=1&demo=1`): open the diff so a screenshot shows it.
+  if (IS_MOCK && new URLSearchParams(window.location.search).has("demo")) void preview();
   el.append(
     statusList,
     counters,
