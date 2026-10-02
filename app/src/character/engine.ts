@@ -926,8 +926,8 @@ export class BotEngine {
       vh,
       vr: Math.min(vh / 2, lerp(0.2, 0.26, s) * R),
       sag: lerp(0.05, 0.025, s) * R,
-      ew: lerp(0.27, 0.36, s) * R * this.es,
-      eh: lerp(0.14, 0.24, s) * R * this.es,
+      ew: lerp(0.3, 0.36, s) * R * this.es,
+      eh: lerp(0.155, 0.24, s) * R * this.es,
       esp: lerp(0.33, 0.37, s) * R,
     };
   }
@@ -942,8 +942,10 @@ export class BotEngine {
     if (lvl < 0.02) return;
     const pal = this.flamePalette();
     const baseY = SHIELD.top * R + R * 0.16;
-    const H = R * 0.66 * lvl;
-    const W = R * 0.5 * clamp(0.65 + 0.35 * lvl, 0.65, 1.15);
+    // Small Zukos get a proportionally bigger flame so it still reads.
+    const small = 1 + 0.4 * clamp((22 - R) / 12, 0, 1);
+    const H = R * 0.7 * lvl * small;
+    const W = R * 0.5 * clamp(0.65 + 0.35 * lvl, 0.65, 1.15) * small;
     const speed = 0.8 + 0.5 * clamp(lvl, 0, 1.6);
 
     x.save();
@@ -1007,7 +1009,7 @@ export class BotEngine {
     const spill = this.tint * this.glow * this.boot;
     if (spill > 0.01) {
       const sg = x.createRadialGradient(0, f.vcy, f.vh * 0.3, 0, f.vcy, R * 1.25);
-      sg.addColorStop(0, rgba(this.col, 0.2 * spill));
+      sg.addColorStop(0, rgba(this.col, 0.13 * spill));
       sg.addColorStop(1, rgba(this.col, 0));
       x.fillStyle = sg;
       x.fill(body);
@@ -1025,7 +1027,7 @@ export class BotEngine {
     x.translate(-R * 0.18, top + R * 0.2);
     x.scale(1, 0.5);
     const hl = x.createRadialGradient(0, 0, 0, 0, 0, R * 0.8);
-    hl.addColorStop(0, "rgba(255,255,255,0.17)");
+    hl.addColorStop(0, "rgba(220,232,255,0.11)");
     hl.addColorStop(1, "rgba(255,255,255,0)");
     x.fillStyle = hl;
     x.beginPath();
@@ -1036,8 +1038,8 @@ export class BotEngine {
     // Cool rim light: the inner half of a wide stroke, brightest top-left.
     const rim = mix3(RIM, this.col, 0.3 * this.tint);
     const rg = x.createLinearGradient(-R, top, R * 0.7, tip);
-    rg.addColorStop(0, rgba(rim, 0.62));
-    rg.addColorStop(0.55, rgba(rim, 0.2));
+    rg.addColorStop(0, rgba(rim, 0.5));
+    rg.addColorStop(0.55, rgba(rim, 0.15));
     rg.addColorStop(1, rgba(rim, 0.06));
     x.lineWidth = Math.max(1.2, R * 0.1);
     x.strokeStyle = rg;
