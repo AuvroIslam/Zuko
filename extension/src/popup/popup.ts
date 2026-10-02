@@ -1,6 +1,7 @@
 // Toolbar popup: is the engine loaded, is the desktop app linked, per-site switches and what
 // Zuko did this session. Reads everything from the service worker; shows no vault values.
 
+import { mascotSvg } from "../shared/mascot.ts";
 import { SITE_IDS, SITE_LABELS, type SiteId } from "../shared/sites.ts";
 
 interface Status {
@@ -128,5 +129,6 @@ $("btn-clear").addEventListener("click", async () => {
   await refresh();
 });
 
+$("mascot").appendChild(mascotSvg(document));
 void refresh();
 setInterval(() => void refresh(), 2000);
