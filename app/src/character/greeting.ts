@@ -1,23 +1,28 @@
-// The launch "zuko" — port of GreetingCanvasView.swift.
-// Everything is laid out in the same 640×150 reference space as on macOS.
+// The launch greeting: Zuko rises into the opened island, its visor boots with
+// a left → right scan line, the LEDs light up, the ember flame ignites, it has
+// a quick look around, then it shrinks into its spot in the compact island.
+//
+// One renderer: the greeting poses a BotEngine (fields + `clock`) every frame
+// and calls `drawAt()`. Everything is laid out in a 640×150 reference space,
+// the size of the expanded island while the greeting plays.
 
 import { Sound } from "../core/sound";
-import { COMPACT_W, NOTCH_H, NOTCH_W } from "../core/layout";
+import { COMPACT_W } from "../core/layout";
+import { BotEngine, LED, hexToRGB, type EyeShape, type RGB } from "./engine";
 
-// ── Timing (mirrors greeting-v2.html `T`) ─────────────────────────────────────
+// ── Timing (seconds) ──────────────────────────────────────────────────────────
 
 const T = {
-  grow: 0.45,
-  squint0: 0.6,
-  squint1: 0.82,
+  rise: 0.45,
+  boot0: 0.6,
+  boot1: 1.2,
   dip0: 1.25,
-  dip1: 1.4,
-  pop0: 1.36,
+  ignite: 1.36,
   pop1: 1.52,
+  happy0: 1.62,
+  happy1: 2.3,
   content0: 2.45,
-  content1: 2.58,
-  tuck0: 2.58,
-  tuck1: 2.8,
+  content1: 2.6,
   badge: 2.72,
   down0: 2.85,
   down1: 3.2,
@@ -33,16 +38,13 @@ export const GREETING_END = T.end;
 
 // ── Geometry (640×150) ────────────────────────────────────────────────────────
 
-const C0 = { x: 320, y: 90 };
-const HB = 58;
-const ASP = 1.34;
-const EAR_X = 40;
-const EAR_Y = 16;
-const EAR_HB = 17;
+const C0 = { x: 320, y: 92 };
+/** Zuko's half width at full size; the body is 2R across. */
+const R_FULL = 31;
+/** Where the compact island draws its bot: botPosition("compact"), diameter 20. */
+const EAR = { x: 320 - COMPACT_W / 2 + 40, y: 16, R: 10 };
 const CARD = { x: 10, y: 36, w: 620, h: 104 };
 const CARD_R = 20;
-const SMALL_W = COMPACT_W;
-const SMALL_H = NOTCH_H;
 
 // ── Easing ────────────────────────────────────────────────────────────────────
 
@@ -60,113 +62,104 @@ const E = {
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const seg = (t: number, a: number, b: number) => clamp((t - a) / (b - a), 0, 1);
+const mix3 = (a: RGB, b: RGB, t: number): RGB => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+const rgba = (c: RGB, a: number) =>
+  `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${clamp(a, 0, 1)})`;
 
 // ── Pose ──────────────────────────────────────────────────────────────────────
 
-type EyeType = "dot" | "happy" | "content";
-
 interface Pose {
-  hb: number; x: number; y: number; sx: number; sy: number; tilt: number;
-  eye: EyeType; open: number; eyeRoll: number;
+  R: number; x: number; y: number; sx: number; sy: number; tilt: number;
+  eye: EyeShape; open: number; es: number;
   lookX: number; lookY: number;
-  handL: number; handR: number; wave: number;
-  badge: number; tint: number; halo: number; haloBlue: number; minis: number; fx: number;
-  header: number; card: number;
-  iw: number; ih: number;
+  /** Visor boot 0…1, flame ignition 0…1(+overshoot), flame flare 0…1. */
+  boot: number; ignite: number; flare: number;
+  /** LED colour: 1 = intro blue, 0 = idle teal. */
+  blue: number;
+  badge: number; halo: number; minis: number; fx: number; card: number;
+}
+
+function blinkAt(t: number, tb: number): number {
+  const k = seg(t, tb, tb + 0.12);
+  return k > 0 && k < 1 ? 1 - Math.sin(Math.PI * k) * 0.94 : 1;
 }
 
 function greetPose(t: number): Pose {
-  const gx = seg(t, 0, 0.5);
-  const g = Math.sin((Math.PI * gx) / 2) + 0.04 * Math.sin(Math.PI * gx) * gx;
-  const iw = lerp(NOTCH_W, 640, g);
-  const ih = lerp(NOTCH_H, 150, g);
-
-  const gg = E.back(seg(t, 0.02, T.grow));
-  const hb = lerp(3, HB, gg);
-  let x = C0.x;
-  let y = lerp(16, C0.y, E.out(seg(t, 0.02, T.grow)));
+  const gg = E.back(seg(t, 0.02, T.rise));
+  const R = lerp(2, R_FULL, gg);
+  const x = C0.x;
+  let y = lerp(16, C0.y, E.out(seg(t, 0.02, T.rise)));
   let sx = 1;
   let sy = 1;
   let tilt = 0;
 
+  // Anticipation dip, then the pop as the flame catches.
   if (t >= T.dip0 && t < T.pop1) {
     const k = Math.sin(Math.PI * seg(t, T.dip0, T.pop1));
-    y += hb * 0.22 * k;
-    sy = 1 - 0.06 * k;
-    sx = 1 + 0.04 * k;
+    const up = seg(t, T.ignite, T.pop1);
+    y += R * 0.2 * k * (1 - up) - R * 0.12 * k * up;
+    sy = 1 - 0.07 * k * (1 - up) + 0.05 * k * up;
+    sx = 1 + 0.05 * k * (1 - up) - 0.03 * k * up;
   }
-  if (t >= T.pop1 && t < T.tuck1) {
+  // A small proud sway while it looks around.
+  if (t >= T.pop1 && t < T.content1) {
     const w = t - T.pop1;
-    const fade = 1 - seg(t, T.tuck0, T.tuck1);
-    x += Math.sin(w * 2 * Math.PI * 0.9) * hb * ASP * 0.05 * fade;
-    tilt = Math.sin(w * 2 * Math.PI * 0.9 + 0.6) * 0.05 * fade;
+    const fade = 1 - seg(t, T.content0, T.content1);
+    tilt = Math.sin(w * 2 * Math.PI * 0.9 + 0.6) * 0.045 * fade;
     y += Math.sin(w * 2 * Math.PI * 1.8) * 0.8 * fade;
   }
-  if (t >= T.tuck0 && t < T.down1) {
-    y += hb * 0.12 * Math.sin(Math.PI * seg(t, T.tuck0, T.down1));
+  if (t >= T.content0 && t < T.down1) {
+    y += R * 0.1 * Math.sin(Math.PI * seg(t, T.content0, T.down1));
   }
 
-  let eye: EyeType = "dot";
-  if (t >= T.squint0 && t < T.squint1) eye = "happy";
-  if (t >= T.content0 && t < T.content1) eye = "content";
-  if (t >= T.down0 && t < T.down1) eye = "content";
-  let eyeRoll = 0;
-  if (t >= T.dip0 && t < T.pop1) eyeRoll = Math.sin(Math.PI * seg(t, T.dip0, T.pop1));
-  const blink = (tb: number) => {
-    const k = seg(t, tb, tb + 0.12);
-    return k > 0 && k < 1 ? 1 - Math.sin(Math.PI * k) * 0.94 : 1;
-  };
-  const open = Math.min(blink(1.95), blink(T.blink2));
+  let eye: EyeShape = "pill";
+  if (t >= T.happy0 && t < T.happy1) eye = "happy";
+  if (t >= T.content0 && t < T.content1) eye = "closed";
+  if (t >= T.down0 && t < T.down1) eye = "closed";
+
+  // Eyes snap a little wide as they power on.
+  const es = 1 + 0.18 * Math.sin(Math.PI * seg(t, T.boot1 - 0.15, T.boot1 + 0.25));
+  const open = Math.min(blinkAt(t, 2.42), blinkAt(t, T.blink2));
 
   let lookX = 0;
   let lookY = 0;
-  if (t >= T.squint1 && t < T.dip0) lookY = -0.2;
-  if (t >= T.pop1 && t < T.content0) { lookX = 0.55; lookY = -0.45; }
-  if (t >= T.content0 && t < T.down1) { lookX = -0.3; lookY = 0.6; }
-  if (t >= T.down1) {
+  if (t >= T.boot1 && t < T.dip0) lookY = -0.15;
+  if (t >= T.pop1 && t < T.content0) {
+    const k = E.inOut(seg(t, T.pop1, T.pop1 + 0.25));
+    const back = E.inOut(seg(t, 2.05, 2.3));
+    lookX = lerp(0, 0.75, k) * (1 - back) + -0.7 * back;
+    lookY = lerp(0, -0.35, k) * (1 - back) + 0.25 * back;
+  }
+  if (t >= T.content0) {
     const k = E.inOut(seg(t, T.down1, T.down1 + 0.35));
-    lookX = lerp(-0.3, 0, k);
-    lookY = lerp(0.6, 0, k);
+    lookX = lerp(-0.7, 0, k);
+    lookY = lerp(0.25, 0, k);
   }
 
-  const handL = t < T.tuck0
-    ? E.back(seg(t, T.pop0, T.pop0 + 0.14))
-    : 1 - E.easeIn(seg(t, T.tuck0, T.tuck1 - 0.03));
-  const handR = t < T.tuck0
-    ? E.back(seg(t, T.pop0 + 0.04, T.pop0 + 0.18))
-    : 1 - E.easeIn(seg(t, T.tuck0 + 0.03, T.tuck1));
-  const wave = t >= T.pop1 && t < T.tuck0 ? t - T.pop1 : -1;
-
   return {
-    hb, x, y, sx, sy, tilt,
-    eye, open, eyeRoll,
+    R, x, y, sx, sy, tilt,
+    eye, open, es,
     lookX, lookY,
-    handL, handR, wave,
-    badge: E.back(seg(t, T.badge, T.badge + 0.28)),
-    tint: 0.6 * E.inOut(seg(t, T.tint0, T.tint1)),
+    boot: E.inOut(seg(t, T.boot0, T.boot1)),
+    ignite: E.back(seg(t, T.ignite, T.ignite + 0.3)),
+    flare: t < T.ignite ? 0 : E.out(seg(t, T.ignite, T.ignite + 0.12)) * (1 - E.inOut(seg(t, T.ignite + 0.12, T.ignite + 1.1))),
+    blue: 1 - E.inOut(seg(t, T.tint0, T.tint1)),
+    badge: E.back(seg(t, T.badge, T.badge + 0.28)) * (1 - E.inOut(seg(t, T.tint0, T.tint1))),
     halo: E.out(seg(t, 0.3, 0.7)),
-    haloBlue: seg(t, T.tint0, T.tint1),
     minis: 0,
     fx: 1,
-    header: seg(t, 0.35, 0.6),
     card: seg(t, 0.18, 0.45),
-    iw, ih,
   };
 }
 
 function smallPose(): Pose {
   return {
-    hb: EAR_HB,
-    x: 320 - SMALL_W / 2 + EAR_X,
-    y: EAR_Y,
+    R: EAR.R, x: EAR.x, y: EAR.y,
     sx: 1, sy: 1, tilt: 0,
-    eye: "dot", open: 1, eyeRoll: 0,
+    eye: "pill", open: 1, es: 1,
     lookX: 0, lookY: 0,
-    handL: 0, handR: 0, wave: -1,
-    badge: 1, tint: 0.6, halo: 0.6, haloBlue: 1,
-    minis: 1, fx: 1,
-    header: 0, card: 0,
-    iw: SMALL_W, ih: SMALL_H,
+    boot: 1, ignite: 1, flare: 0, blue: 0,
+    badge: 0, halo: 0.6, minis: 1, fx: 1, card: 0,
   };
 }
 
@@ -176,26 +169,23 @@ function pose(t: number, tc: number): Pose {
   const b = smallPose();
   const e = E.inOut(seg(t, tc, tc + T.COLLAPSE));
   const p: Pose = { ...a };
-  p.iw = lerp(a.iw, b.iw, e);
-  p.ih = lerp(a.ih, b.ih, e);
   p.x = lerp(a.x, b.x, e);
   p.y = lerp(a.y, b.y, e);
-  p.hb = lerp(a.hb, b.hb, e);
+  p.R = lerp(a.R, b.R, e);
   p.badge = lerp(a.badge, b.badge, e);
-  p.tint = lerp(a.tint, b.tint, e);
+  p.blue = lerp(a.blue, b.blue, e);
   p.halo = lerp(a.halo, b.halo, e);
-  p.haloBlue = lerp(a.haloBlue, b.haloBlue, e);
-  p.header = a.header * (1 - seg(t, tc, tc + 0.1));
+  // Cut short mid-boot: finish booting on the way down.
+  p.boot = lerp(a.boot, 1, e);
+  p.ignite = lerp(a.ignite, 1, e);
+  p.flare = a.flare * (1 - e);
   p.card = a.card * (1 - seg(t, tc, tc + 0.18));
-  p.handL = a.handL * (1 - seg(t, tc, tc + 0.15));
-  p.handR = a.handR * (1 - seg(t, tc, tc + 0.15));
   p.tilt = a.tilt * (1 - e);
   p.sx = lerp(a.sx, 1, e);
   p.sy = lerp(a.sy, 1, e);
-  p.eyeRoll = a.eyeRoll * (1 - e);
-  const bk = seg(t, tc + 0.14, tc + 0.26);
-  p.eye = "dot";
-  p.open = bk > 0 && bk < 1 ? 1 - Math.sin(Math.PI * bk) * 0.94 : 1;
+  p.es = lerp(a.es, 1, e);
+  p.eye = "pill";
+  p.open = blinkAt(t, tc + 0.14);
   p.lookX = a.lookX * (1 - e);
   p.lookY = a.lookY * (1 - e);
   p.minis = E.back(seg(t, tc + 0.24, tc + 0.42));
@@ -203,280 +193,82 @@ function pose(t: number, tc: number): Pose {
   return p;
 }
 
-// ── Particles (seeded LCG, seed = 7, identical sequence to the Swift version) ──
+// ── Effects (seeded, so every launch looks the same) ─────────────────────────
 
-interface RingDot { a: number; j: number; s: number; al: number }
-interface Ring { t0: number; dots: RingDot[] }
-interface Streak { a: number; sp: number; len: number; t0: number; col: string }
+interface Spark { a: number; sp: number; t0: number; life: number; s: number; drift: number }
 
-const PARTICLES = (() => {
-  let seed = 7;
+const SPARKS: Spark[] = (() => {
+  let seed = 11;
   const rnd = () => {
     seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
     return seed / 0x7fffffff;
   };
-  const rings: Ring[] = [0.1, 0.2, 0.3, 0.45, 0.6].map((t0) => ({
-    t0,
-    dots: Array.from({ length: 170 }, () => ({
-      a: rnd() * Math.PI * 2,
-      j: (rnd() - 0.5) * 0.22,
-      s: 0.7 + rnd() * 0.9,
-      al: 0.45 + rnd() * 0.55,
-    })),
+  return Array.from({ length: 14 }, () => ({
+    a: -Math.PI / 2 + (rnd() - 0.5) * 1.5,
+    sp: 38 + rnd() * 46,
+    t0: T.ignite + rnd() * 0.35,
+    life: 0.55 + rnd() * 0.5,
+    s: 0.9 + rnd() * 1.1,
+    drift: (rnd() - 0.5) * 30,
   }));
-  const cols = ["#3B9EFF", "#F29B38", "#FF5A4E", "#2EC4A0", "#A78BFA"];
-  const streaks: Streak[] = Array.from({ length: 16 }, (_, i) => ({
-    a: (i / 16) * Math.PI * 2 + (rnd() - 0.5) * 0.3,
-    sp: 230 + rnd() * 260,
-    len: 6 + rnd() * 9,
-    t0: 0.08 + rnd() * 0.14,
-    col: cols[i % 5],
-  }));
-  return { rings, streaks };
 })();
 
-// ── Drawing ───────────────────────────────────────────────────────────────────
+/** Shield pulses: thin rings that leave Zuko as the visor boots and the flame catches. */
+const PULSES = [
+  { t0: T.boot0 + 0.05, col: LED.blue, a: 0.55 },
+  { t0: T.boot1 - 0.05, col: LED.blue, a: 0.45 },
+  { t0: T.ignite, col: hexToRGB("#FF9A3C"), a: 0.5 },
+];
 
-function rr(x: CanvasRenderingContext2D, X: number, Y: number, W: number, H: number, R: number) {
-  const r = Math.max(0, Math.min(R, W / 2, H / 2));
-  x.beginPath();
-  x.moveTo(X + r, Y);
-  x.arcTo(X + W, Y, X + W, Y + H, r);
-  x.arcTo(X + W, Y + H, X, Y + H, r);
-  x.arcTo(X, Y + H, X, Y, r);
-  x.arcTo(X, Y, X + W, Y, r);
-  x.closePath();
-}
+const EMBER_HOT = hexToRGB("#FFD166");
+const EMBER = hexToRGB("#FF7A1A");
 
-function zukoPath(hw: number, hh: number): Path2D {
-  const n = 3.2;
-  const p = new Path2D();
-  const steps = 96;
-  for (let i = 0; i <= steps; i++) {
-    const a = (i / steps) * 2 * Math.PI;
-    const ca = Math.cos(a);
-    const sa = Math.sin(a);
-    const px = hw * (ca < 0 ? -1 : 1) * Math.pow(Math.abs(ca), 2 / n);
-    const py = hh * (sa < 0 ? -1 : 1) * Math.pow(Math.abs(sa), 2 / n);
-    if (i === 0) p.moveTo(px, py);
-    else p.lineTo(px, py);
-  }
-  p.closePath();
-  return p;
-}
+function drawEffects(x: CanvasRenderingContext2D, t: number, p: Pose) {
+  const alpha = p.fx * Math.max(p.card, p.fx < 1 ? 1 : 0);
+  if (alpha <= 0.01) return;
 
-function whiteFill(
-  x: CanvasRenderingContext2D, path: Path2D,
-  x0: number, y0: number, x1: number, y1: number,
-) {
-  const g = x.createLinearGradient(x0, y0, x1, y1);
-  g.addColorStop(0, "rgb(251,251,252)");
-  g.addColorStop(1, "rgb(231,233,236)");
-  x.save();
-  x.fillStyle = g;
-  x.fill(path);
-  x.restore();
-}
-
-function drawHandL(x: CanvasRenderingContext2D, hw: number, hh: number, p: Pose) {
-  const k = p.handL;
-  if (k <= 0.01) return;
-  const hb = hh * 2;
-  const r = hb * 0.15 * k;
-  const rx = lerp(-hw * 0.35, -hw - hb * 0.22, k);
-  let ry = lerp(hh * 0.85, hh * 0.62, k);
-  if (p.wave >= 0) ry += Math.sin(p.wave * 6) * hb * 0.02;
-  x.save();
-  x.translate(rx, ry);
-  const circ = new Path2D();
-  circ.ellipse(0, 0, r, r, 0, 0, Math.PI * 2);
-  whiteFill(x, circ, r, -r, -r, r);
-  x.strokeStyle = "rgba(0,0,0,0.08)";
-  x.lineWidth = 0.8;
-  x.stroke(circ);
-  x.restore();
-}
-
-function drawHandR(x: CanvasRenderingContext2D, hw: number, hh: number, p: Pose) {
-  const k = p.handR;
-  if (k <= 0.01) return;
-  const hb = hh * 2;
-  const L = hb * 0.4 * k;
-  const T2 = hb * 0.22 * k;
-  let rx = lerp(hw * 0.35, hw + hb * 0.2, k);
-  let ry = lerp(hh * 0.85, hh * 0.2, k);
-  let ang = -0.61;
-  if (p.wave >= 0) {
-    const w = p.wave * 2 * Math.PI * 2.5;
-    ang += Math.sin(w) * 0.21;
-    ry += Math.sin(w + 0.8) * hb * 0.04;
-    rx += Math.cos(w) * hb * 0.015;
-  }
-  x.save();
-  x.translate(rx, ry);
-  x.rotate(ang);
-  const g = x.createLinearGradient(L / 2, -T2 / 2, -L / 2, T2 / 2);
-  g.addColorStop(0, "rgb(251,251,252)");
-  g.addColorStop(1, "rgb(231,233,236)");
-  rr(x, -L / 2, -T2 / 2, L, T2, T2 / 2);
-  x.fillStyle = g;
-  x.fill();
-  x.strokeStyle = "rgba(0,0,0,0.08)";
-  x.lineWidth = 0.8;
-  x.stroke();
-  x.restore();
-}
-
-function drawZuko(x: CanvasRenderingContext2D, p: Pose) {
-  const hh = p.hb / 2;
-  const hw = hh * ASP;
-  if (hh <= 0.4) return;
-
-  // Halo: golden → blue, two passes for a soft aura
-  if (p.halo > 0) {
-    const bl = p.haloBlue;
-    const cr = Math.round(lerp(232, 59, bl));
-    const cg = Math.round(lerp(195, 158, bl));
-    const cb = Math.round(lerp(154, 255, bl));
-    for (const [R, alpha] of [[hw * 2.6, 0.18], [hw * 4.2, 0.07]] as const) {
-      const g = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
-      g.addColorStop(0, `rgba(${cr},${cg},${cb},${alpha * p.halo})`);
-      g.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
-      x.fillStyle = g;
-      x.beginPath();
-      x.arc(p.x, p.y, R, 0, Math.PI * 2);
-      x.fill();
-    }
-  }
-
-  x.save();
-  x.translate(p.x, p.y);
-  x.rotate(p.tilt);
-  x.scale(p.sx, p.sy);
-
-  drawHandL(x, hw, hh, p);
-  drawHandR(x, hw, hh, p);
-
-  const body = zukoPath(hw, hh);
-  whiteFill(x, body, hw * 0.6, -hh, -hw * 0.6, hh);
-
-  if (p.tint > 0) {
-    const g = x.createLinearGradient(0, hh, 0, -hh * 0.1);
-    g.addColorStop(0, `rgba(127,180,234,${p.tint})`);
-    g.addColorStop(1, "rgba(127,180,234,0)");
-    x.save();
-    x.clip(body);
+  // A faint card-wide scan line echoing the visor boot.
+  const sweep = seg(t, T.boot0, T.boot1);
+  if (sweep > 0 && sweep < 1) {
+    const sxp = lerp(CARD.x, CARD.x + CARD.w, E.inOut(sweep));
+    const fade = Math.sin(Math.PI * sweep) * alpha;
+    const g = x.createLinearGradient(sxp - 120, 0, sxp, 0);
+    g.addColorStop(0, rgba(LED.blue, 0));
+    g.addColorStop(1, rgba(LED.blue, 0.1 * fade));
     x.fillStyle = g;
-    x.fill(body);
-    x.restore();
+    x.fillRect(sxp - 120, CARD.y, 120, CARD.h);
+    x.fillStyle = rgba(LED.blue, 0.35 * fade);
+    x.fillRect(sxp - 0.75, CARD.y, 1.5, CARD.h);
   }
 
-  // Eyes
-  x.save();
-  x.clip(body);
-  x.fillStyle = "#16171A";
-  x.strokeStyle = "#16171A";
-  const er = p.hb * 0.06;
-  const sp = p.hb * 0.19;
-  const lx = p.lookX * hw * 0.42;
-  const ly = p.lookY * hh * 0.28 + hh * 0.12 + p.eyeRoll * hh * 1.25;
-  for (const sd of [-1, 1]) {
-    x.save();
-    x.translate(sd * sp + lx, ly);
-    if (p.eye === "happy") {
-      x.lineWidth = er * 0.95;
-      x.lineCap = "round";
-      x.beginPath();
-      x.arc(0, er * 0.6, er * 1.25, Math.PI * 1.15, Math.PI * 1.85);
-      x.stroke();
-    } else if (p.eye === "content") {
-      x.lineWidth = er * 0.95;
-      x.lineCap = "round";
-      x.beginPath();
-      x.arc(0, -er * 0.5, er * 1.25, Math.PI * 0.15, Math.PI * 0.85);
-      x.stroke();
-    } else {
-      x.scale(1, Math.max(0.12, p.open));
-      x.beginPath();
-      x.arc(0, 0, er, 0, Math.PI * 2);
-      x.fill();
-    }
-    x.restore();
-  }
-  x.restore();
-
-  // Activity badge
-  if (p.badge > 0.01) {
-    const br = hh * 0.3;
-    x.save();
-    x.translate(-hw * 0.78, -hh * 0.72);
-    x.scale(p.badge, p.badge);
-    x.fillStyle = "#000";
-    x.beginPath();
-    x.arc(0, 0, br + hh * 0.07, 0, Math.PI * 2);
-    x.fill();
-    x.fillStyle = "#3BA0F5";
-    x.beginPath();
-    x.arc(0, 0, br, 0, Math.PI * 2);
-    x.fill();
-    x.fillStyle = "#0B1B3A";
-    for (const i of [-1, 0, 1]) {
-      x.beginPath();
-      x.arc(i * br * 0.5, 0, br * 0.17, 0, Math.PI * 2);
-      x.fill();
-    }
-    x.restore();
-  }
-
-  x.restore();
-}
-
-function drawParticles(x: CanvasRenderingContext2D, t: number, p: Pose) {
-  if (!(p.card > 0 || p.fx < 1)) return;
-  for (const ring of PARTICLES.rings) {
-    const k = seg(t, ring.t0, ring.t0 + 1.35);
+  for (const pu of PULSES) {
+    const k = seg(t, pu.t0, pu.t0 + 1.1);
     if (k <= 0 || k >= 1) continue;
-    const rx = lerp(14, 380, E.out(k));
-    const ry = rx * 0.34;
-    const fade = (1 - k) * (k < 0.08 ? k / 0.08 : 1) * p.fx * p.card;
-    for (const dot of ring.dots) {
-      const r = 1 + dot.j;
-      x.fillStyle = `rgba(255,255,255,${dot.al * fade})`;
-      x.fillRect(C0.x + Math.cos(dot.a) * rx * r, C0.y + Math.sin(dot.a) * ry * r, dot.s, dot.s);
-    }
-  }
-  for (const s of PARTICLES.streaks) {
-    const k = seg(t, s.t0, s.t0 + 0.6);
-    if (k <= 0 || k >= 1) continue;
-    const dist = s.sp * E.out(k) * 0.9 + 10;
-    const alpha = (1 - k) * p.fx;
-    x.strokeStyle = s.col + Math.round(alpha * 255).toString(16).padStart(2, "0");
-    x.lineWidth = 1.6;
-    x.lineCap = "round";
+    const rx = lerp(R_FULL * 0.9, 360, E.out(k));
+    const a = pu.a * Math.pow(1 - k, 1.6) * alpha;
+    x.strokeStyle = rgba(pu.col, a);
+    x.lineWidth = lerp(2, 1, k);
     x.beginPath();
-    x.moveTo(C0.x + Math.cos(s.a) * (dist - s.len), C0.y + Math.sin(s.a) * (dist - s.len) * 0.42);
-    x.lineTo(C0.x + Math.cos(s.a) * dist, C0.y + Math.sin(s.a) * dist * 0.42);
+    x.ellipse(C0.x, C0.y, rx, rx * 0.36, 0, 0, Math.PI * 2);
     x.stroke();
   }
+
+  // Embers thrown up as the flame ignites.
+  const fy = C0.y - R_FULL * 0.95;
+  for (const s of SPARKS) {
+    const k = (t - s.t0) / s.life;
+    if (k <= 0 || k >= 1) continue;
+    const d = s.sp * E.out(k);
+    const px = C0.x + Math.cos(s.a) * d + s.drift * k * k;
+    const py = fy + Math.sin(s.a) * d + 18 * k * k;
+    x.fillStyle = rgba(mix3(EMBER_HOT, EMBER, k), (1 - k) * alpha);
+    x.beginPath();
+    x.arc(px, py, s.s * (1 - k * 0.5), 0, Math.PI * 2);
+    x.fill();
+  }
 }
 
-const MINI_COLORS = ["#E86A6A", "#3E86E0", "#EFAE5A", "#8C73F2"];
-
-function drawMinis(x: CanvasRenderingContext2D, alpha: number) {
-  if (alpha <= 0.01) return;
-  const cx = 320 + SMALL_W / 2 - 27;
-  const cy = 16;
-  const sp = 6;
-  const offsets: [number, number][] = [[-sp, -sp], [sp, -sp], [-sp, sp], [sp, sp]];
-  offsets.forEach(([dx, dy], i) => {
-    x.save();
-    x.translate(cx + dx, cy + dy);
-    x.scale(alpha, alpha);
-    x.fillStyle = MINI_COLORS[i];
-    x.fill(zukoPath(5.3, 4));
-    x.restore();
-  });
-}
+const MINI_COLORS = ["#22C55E", "#3E86E0", "#EAB308", "#A78BFA"];
 
 // ── Controller ────────────────────────────────────────────────────────────────
 
@@ -489,8 +281,21 @@ export class Greeting {
   private tc = Number.POSITIVE_INFINITY;
   private fired = false;
   private timers: number[] = [];
+  private bot = new BotEngine();
+  private minis: BotEngine[] = MINI_COLORS.map((c, i) => {
+    const m = new BotEngine();
+    m.isMini = true;
+    m.bodyColor = hexToRGB(c);
+    m.flickerSeed = i * 1.7;
+    return m;
+  });
 
   onComplete: (() => void) | null = null;
+
+  constructor() {
+    this.bot.flickerSeed = 3.1;
+    this.bot.snapToState();
+  }
 
   start() {
     this.startMs = performance.now();
@@ -498,7 +303,7 @@ export class Greeting {
     this.fired = false;
     this.cancelTimers();
     this.timers.push(
-      window.setTimeout(() => Sound.play("greet"), T.pop0 * 1000),
+      window.setTimeout(() => Sound.play("greet"), T.boot0 * 1000),
       window.setTimeout(() => Sound.play("blip"), T.badge * 1000),
       window.setTimeout(() => this.fire(), (T.end + 0.05) * 1000),
     );
@@ -539,28 +344,91 @@ export class Greeting {
   draw(x: CanvasRenderingContext2D) {
     const t = this.elapsed;
     if (!this.fired && t >= T.end && this.tc >= T.autoLeave) this.fire();
+    this.drawFrame(x, t, this.tc);
+  }
 
-    const p = pose(t, this.tc);
+  /**
+   * Draws the frame at `t` seconds into the greeting, collapsing from `tc`
+   * (Infinity = not collapsing). Pure: previews call it with fixed times.
+   */
+  drawFrame(x: CanvasRenderingContext2D, t: number, tc = Number.POSITIVE_INFINITY) {
+    const p = pose(t, tc);
     x.clearRect(0, 0, 640, 150);
 
     if (p.card > 0) {
       x.save();
       x.globalAlpha = p.card;
-      rr(x, CARD.x, CARD.y, CARD.w, CARD.h, CARD_R);
-      x.fillStyle = "#141518";
+      x.beginPath();
+      x.roundRect(CARD.x, CARD.y, CARD.w, CARD.h, CARD_R);
+      x.fillStyle = "#121318";
       x.fill();
       x.restore();
 
       x.save();
-      rr(x, CARD.x, CARD.y, CARD.w, CARD.h, CARD_R);
+      x.beginPath();
+      x.roundRect(CARD.x, CARD.y, CARD.w, CARD.h, CARD_R);
       x.clip();
-      drawParticles(x, t, p);
+      drawEffects(x, t, p);
       x.restore();
-    } else if (Number.isFinite(this.tc) && t >= this.tc) {
-      drawParticles(x, t, p);
+    } else if (Number.isFinite(tc) && t >= tc) {
+      drawEffects(x, t, p);
     }
 
-    drawMinis(x, p.minis);
-    drawZuko(x, p);
+    this.drawMinis(x, p.minis, t);
+    this.drawZuko(x, p, t);
+  }
+
+  private drawZuko(x: CanvasRenderingContext2D, p: Pose, t: number) {
+    if (p.R <= 0.6) return;
+    const col = mix3(LED.teal, LED.blue, p.blue);
+
+    // Soft halo in the LED colour, warming as the flame catches.
+    if (p.halo > 0.01) {
+      const lit = p.halo * (0.35 + 0.65 * p.boot);
+      for (const [rad, a] of [[p.R * 2.4, 0.16], [p.R * 4, 0.06]] as const) {
+        const g = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, rad);
+        g.addColorStop(0, rgba(col, a * lit));
+        g.addColorStop(1, rgba(col, 0));
+        x.fillStyle = g;
+        x.beginPath();
+        x.arc(p.x, p.y, rad, 0, Math.PI * 2);
+        x.fill();
+      }
+    }
+
+    const b = this.bot;
+    b.clock = t;
+    b.col = b.colT = col;
+    b.tint = 0.5;
+    b.glow = 1;
+    b.flameLevel = 0.85;
+    b.boot = p.boot;
+    b.ignite = p.ignite;
+    b.flare = p.flare;
+    b.sx = p.sx;
+    b.sy = p.sy;
+    b.tilt = p.tilt;
+    b.es = p.es;
+    b.open = p.open;
+    b.yaw = p.lookX * 0.62;
+    b.pitch = p.lookY * 0.5;
+    b.eyeOverride = p.eye;
+    b.badge = p.badge > 0.01 ? { kind: "dots", color: col } : null;
+    b.badgeS = p.badge;
+    b.drawAt(x, p.x, p.y, p.R);
+  }
+
+  /** The compact island's mini bots popping in as Zuko lands in its spot. */
+  private drawMinis(x: CanvasRenderingContext2D, alpha: number, t: number) {
+    if (alpha <= 0.01) return;
+    const cx = 320 + COMPACT_W / 2 - 27;
+    const cy = 16;
+    const sp = 6;
+    const offsets: [number, number][] = [[-sp, -sp], [sp, -sp], [-sp, sp], [sp, sp]];
+    offsets.forEach(([dx, dy], i) => {
+      const m = this.minis[i];
+      m.clock = t;
+      m.drawAt(x, cx + dx, cy + dy - 0.5, 4.6 * alpha);
+    });
   }
 }

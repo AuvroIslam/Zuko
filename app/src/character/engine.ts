@@ -398,7 +398,7 @@ export class BotEngine {
   lastTime = now();
   private t0 = now() - Math.random() * 5;
   /** Per-instance phase so neighbouring mini bots never flicker in step. */
-  private readonly flickerSeed = Math.random() * 100;
+  flickerSeed = Math.random() * 100;
   private nextBlink = now() + 1.5 + Math.random() * 2;
   private greetToken = 0;
   private lastAmbient = 0;

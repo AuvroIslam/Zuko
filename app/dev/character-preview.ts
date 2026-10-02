@@ -139,8 +139,9 @@ if (want("minis")) {
 if (want("greet")) {
   const row = section("Greeting (t in s; c = collapsing)");
   const g = new Greeting();
-  const S = 0.56;
-  const frames: [number, number][] = [
+  const S = Number(params.get("gs") ?? 0.56);
+  const ft = params.get("gt")?.split(",").map(Number);
+  const frames: [number, number][] = ft ? ft.map((t) => [t, Infinity]) : [
     [0.15, Infinity], [0.45, Infinity], [0.8, Infinity], [1.05, Infinity],
     [1.45, Infinity], [1.9, Infinity], [2.75, Infinity], [3.5, Infinity],
     [4.3, Infinity], [5.0, 4.75], [5.2, 4.75],
