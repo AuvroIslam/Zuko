@@ -13,6 +13,8 @@ crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Common Controls v6 manifest for the unit-test binary (see build.rs).
+embed-resource = "3"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
