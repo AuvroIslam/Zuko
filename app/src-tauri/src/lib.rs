@@ -6,6 +6,7 @@
 
 mod auditlog;
 mod claude;
+mod clipcopy;
 mod commands;
 mod engine;
 mod events;
@@ -176,6 +177,30 @@ fn open_in_vscode(path: Option<String>) -> bool {
     }
     if let Some(p) = path.as_deref() {
         platform::reveal_folder(p);
+    }
+    false
+}
+
+/// "Open file" on an activity row: opens the file Claude just wrote or edited in VS Code
+/// (`code --goto <path>`) when `code` is on PATH, otherwise shows its folder in the file
+/// manager. Same rules as `open_in_vscode`: no shell, the path is its own argument, and
+/// only an existing file given by its full path gets this far (the path comes from a hook
+/// payload; xdg-open or a shell would run a file with whatever handles its type).
+#[tauri::command]
+fn open_file(path: String) -> bool {
+    let p = std::path::Path::new(&path);
+    if !(p.is_absolute() && p.is_file()) {
+        return false;
+    }
+    if let Some(code) = platform::find_on_path("code") {
+        let mut cmd = Command::new(code);
+        cmd.arg("--goto").arg(p);
+        if platform::no_console(&mut cmd).spawn().is_ok() {
+            return true;
+        }
+    }
+    if let Some(dir) = p.parent() {
+        platform::reveal_folder(&dir.to_string_lossy());
     }
     false
 }
@@ -442,6 +467,7 @@ pub fn run() {
             reposition,
             open_url,
             open_in_vscode,
+            open_file,
             quit_app,
             hooks_status,
             hooks_preview,
@@ -471,6 +497,8 @@ pub fn run() {
             commands::vault_forget,
             commands::vault_clear,
             commands::vault_reveal,
+            commands::vault_insights,
+            commands::vault_copy,
             commands::activity_recent,
             commands::audit_verify,
             commands::audit_open_folder,

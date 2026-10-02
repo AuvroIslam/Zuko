@@ -1295,6 +1295,24 @@ mod tests {
     }
 
     #[test]
+    fn editing_tools_carry_the_file_path_for_open_file() {
+        let e = engine();
+        let target = format!("{CWD}/src/main.rs");
+        let out = process(&e, &hooks_only(), &pre("Edit", json!({"file_path": target, "old_string": "a", "new_string": "b"})));
+        assert_eq!(activity(&out).path.as_deref(), Some(target.as_str()));
+        // Only the editing tools; reads and shell commands carry none.
+        let out = process(&e, &hooks_only(), &pre("Read", json!({"file_path": target})));
+        assert_eq!(activity(&out).path, None);
+        assert_eq!(edited_path("Bash", &json!({"file_path": target}), CWD), None);
+        assert_eq!(edited_path("NotebookEdit", &json!({"notebook_path": target}), CWD).as_deref(), Some(target.as_str()));
+        assert_eq!(edited_path("Write", &json!({"file_path": ""}), CWD), None);
+        // Relative paths resolve against the working directory; without one they are dropped.
+        let rel = edited_path("Write", &json!({"file_path": "notes.txt"}), CWD).unwrap();
+        assert!(rel.starts_with(CWD) && rel.ends_with("notes.txt"));
+        assert_eq!(edited_path("Write", &json!({"file_path": "notes.txt"}), ""), None);
+    }
+
+    #[test]
     fn a_placeholder_in_a_write_is_filled_in_locally() {
         let e = engine_with_key();
         let input = json!({"file_path": format!("{CWD}\\.env"), "content": "OPENAI_API_KEY={{API_KEY_1}}\n"});
