@@ -143,7 +143,7 @@ interface PunchPose {
 }
 
 /** A fist in effects-layer coordinates, with its arm direction and radius. */
-interface Fist { x: number; y: number; dx: number; dy: number; r: number }
+export interface Fist { x: number; y: number; dx: number; dy: number; r: number }
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -842,6 +842,19 @@ export class BotEngine {
   /** True while any fire effect is on screen (the effects layer must be redrawn). */
   get fxActive(): boolean {
     return this.fx.length > 0 || this.fistFireLevel(1) > 0.02 || this.fistFireLevel(-1) > 0.02;
+  }
+
+  /**
+   * A fist on the effects layer as of the last draw (side −1 = viewer's left),
+   * with its arm direction and radius; null for tiny figures without arms.
+   */
+  fistPosition(side: -1 | 1): Readonly<Fist> | null {
+    return this.fists[side < 0 ? 0 : 1];
+  }
+
+  /** The figure's origin on the effects layer as of the last draw, and its R. */
+  get fxAnchor(): Readonly<{ x: number; y: number; R: number }> | null {
+    return this.anchor;
   }
 
   /** Dev only: holds the fire at `at` seconds into the last effect started. */

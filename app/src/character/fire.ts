@@ -377,6 +377,6 @@ export function swirl(
     const rr = r * (0.75 + 0.35 * easeOut(k)) * (j ? 0.82 : 1);
     const n = 14;
     const pts = arcPoints(cx, cy, rr, rr * squash, a0, a0 + sweep, n, rot);
-    flameRibbon(x, pts, taper(n, r * 0.2 * (j ? 0.75 : 1)), t, pal, a, seed + j * 3);
+    flameRibbon(x, pts, taper(n, r * 0.15 * (j ? 0.75 : 1), 0.6), t, pal, a, seed + j * 3);
   }
 }

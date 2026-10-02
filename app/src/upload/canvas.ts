@@ -2,12 +2,15 @@
 //
 // While the sequence engine is active this canvas draws the whole island body:
 // card, dashed drop frame, drop text, progress bar, the choose card, Zuko and
-// the dropped file. Zuko scans the file: a beam from its visor sweeps the page
-// top to bottom, then a shield-check badge pops on it. The island's own Zuko is
-// hidden for the duration because this canvas poses its own BotEngine.
+// the dropped file. Zuko scans the file with fire: he points a burning fist at
+// it, a sweep of flame runs down the page and every secret line it passes is
+// burned into a placeholder block, then a flame-shield check pops on it. The
+// island's own Zuko is hidden for the duration because this canvas poses its
+// own BotEngine.
 
 import { State } from "../core/state";
 import { BotEngine, LED, shieldPath, type EyeShape, type RGB } from "../character/engine";
+import { FIRE, ember, flameRibbon, glow, seeded, taper } from "../character/fire";
 import { USC, lerp, progressAt, seg, type UploadEyeShape, type UploadFrame } from "./sequence";
 
 const FONT = 'system-ui, "Segoe UI Variable Text", "Segoe UI", sans-serif';
@@ -33,11 +36,18 @@ function blinkAt(t: number, tb: number): number {
   return k > 0 && k < 1 ? 1 - Math.sin(Math.PI * k) * 0.94 : 1;
 }
 
-const EYE: Record<UploadEyeShape, EyeShape> = { pill: "pill", cup: "cup", content: "happy", wide: "wide" };
+const EYE: Record<UploadEyeShape, EyeShape> = { pill: "pill", cup: "cup", content: "happy", wide: "pill" };
 
 /** Document size at scale 1, in island points. */
 const DOC_W = 34;
 const DOC_H = 42;
+
+/** The sheet's text lines: [y, width] as fractions of the sheet; secrets get burned. */
+const DOC_LINES: readonly [number, number, boolean][] = [
+  [0.3, 0.42, false], [0.43, 0.64, true], [0.54, 0.64, false], [0.65, 0.5, true], [0.76, 0.38, false],
+];
+
+const FIRE_PAL = FIRE.ember;
 
 function text(
   ctx: CanvasRenderingContext2D,
@@ -137,14 +147,16 @@ export class UploadCanvas {
     ctx.fillStyle = "#0D0E10";
     ctx.fillRect(USC.CARD_X, USC.CARD_Y, USC.CARD_W, USC.CARD_H);
 
-    // Green glow, fanning up from the bottom edge of the card.
+    // Glow fanning up from the bottom edge of the card: warm firelight while
+    // Zuko works on the file, green once it is uploading safely.
     if (f.greenWash > 0) {
       const gx = USC.CARD_X + USC.CARD_W / 2;
       const gy = USC.CARD_Y + USC.CARD_H;
+      const c = f.pt < USC.T_PROG_START ? "242,138,30" : "40,212,130";
       const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, USC.CARD_H * 1.5);
-      g.addColorStop(0, `rgba(40,212,130,${f.greenWash * 0.9})`);
-      g.addColorStop(0.55, `rgba(40,212,130,${f.greenWash * 0.3})`);
-      g.addColorStop(1, "rgba(40,212,130,0)");
+      g.addColorStop(0, `rgba(${c},${f.greenWash * 0.9})`);
+      g.addColorStop(0.55, `rgba(${c},${f.greenWash * 0.3})`);
+      g.addColorStop(1, `rgba(${c},0)`);
       ctx.fillStyle = g;
       ctx.fillRect(USC.CARD_X, USC.CARD_Y, USC.CARD_W, USC.CARD_H);
     }
@@ -154,7 +166,7 @@ export class UploadCanvas {
     if (f.zoneAlpha > 0) {
       ctx.save();
       ctx.globalAlpha = f.zoneAlpha;
-      ctx.strokeStyle = f.zoneOver ? "rgba(46,230,197,0.5)" : "rgba(255,255,255,0.14)";
+      ctx.strokeStyle = f.zoneOver ? "rgba(242,138,30,0.55)" : "rgba(255,255,255,0.14)";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 5]);
       ctx.lineDashOffset = -wallTime * 20;
@@ -293,35 +305,54 @@ export class UploadCanvas {
 
   // ── Zuko ──────────────────────────────────────────────────────────────────
 
-  /** Teal while scanning; green once the file has its badge and when the bar completes. */
+  /** Amber while scanning; golden once the file has its badge and when the bar completes. */
   private ledColor(f: UploadFrame): RGB {
     const ok = Math.max(clamp01(f.badge) * (1 - seg(f.pt, USC.T_CHEW_END, USC.T_SHRINK_END)), f.flash);
-    return mix3(LED.teal, LED.green, ok);
+    return mix3(LED.ember, LED.gold, ok);
   }
 
-  /** Zuko's half width: the sequence's `d` is the old body box. */
+  /** Zuko's half box: the sequence's `d` is the old body box. */
   private zukoR(f: UploadFrame): number {
     return (f.d / 2) * 0.92;
+  }
+
+  /** The fire sweep's height on the page: a preview bob while hovering, one pass after the drop. */
+  private sweepY(f: UploadFrame, wallTime: number): number {
+    const s = f.docScale;
+    const h = DOC_H * s;
+    const top = f.docY - h / 2;
+    const bot = f.docY + h / 2;
+    return f.dropped ? lerp(top + 3 * s, bot - 3 * s, f.scan) : f.docY + Math.sin(wallTime * 4.5) * h * 0.36;
+  }
+
+  /** How hard the sweep burns: only after the drop, and only while the page is there. */
+  private burn(f: UploadFrame): number {
+    return f.dropped && f.fileVisible ? f.beam * f.docAlpha : 0;
   }
 
   private drawZuko(ctx: CanvasRenderingContext2D, f: UploadFrame, wallTime: number, col: RGB) {
     const b = this.bot;
     const pt = f.pt;
+    const R = this.zukoR(f);
     b.clock = wallTime;
     b.col = b.colT = col;
     b.tint = 0.55;
     b.glow = 1;
     b.boot = 1;
     b.ignite = 1;
-    b.flameLevel = 0.9;
     b.flare = f.dropped ? Math.max(pulse(pt, USC.T_DROP, 0.6) * 0.7, pulse(pt, USC.T_CHEW1, 0.7)) : 0;
     b.boost = f.dropped ? pulse(pt, USC.T_CHEW1, 0.6) * 0.6 : 0;
     b.morph = Math.min(1, f.morph);
-    // The visor's own sweep runs while the file hovers; after the drop the
-    // beam leaves the visor instead.
+    // While the file hovers his fists burn in the ready stance; after the drop
+    // one fist points at the page and throws the sweep.
     b.slotH = f.dropped ? 0 : 0.1 + f.beam * 0.35;
     b.slotHTarget = 0;
     b.isScanning = false;
+    const burn = this.burn(f);
+    const edge = f.docX - (DOC_W * f.docScale) / 2;
+    b.punch = 0.6 * burn;
+    b.punchAngle = Math.atan2(this.sweepY(f, wallTime) - (f.y + f.hop + R * 0.45), edge - f.x);
+    b.fistFire = burn;
     b.sx = f.sx;
     b.sy = f.sy;
     b.tilt = f.tilt;
@@ -330,10 +361,11 @@ export class UploadCanvas {
     b.eyeOverride = EYE[f.eye];
     b.open = Math.min(blinkAt(pt, USC.T_CHEW_END + 0.2), blinkAt(pt, f.growEnd + 0.45));
     b.badge = null;
-    b.drawAt(ctx, f.x, f.y + f.hop, this.zukoR(f));
+    b.drawAt(ctx, f.x, f.y + f.hop, R);
+    b.drawFx(ctx);
   }
 
-  // ── The file, the scan beam and the badge ─────────────────────────────────
+  // ── The file, the fire sweep and the badge ────────────────────────────────
 
   private drawFile(ctx: CanvasRenderingContext2D, f: UploadFrame, wallTime: number, col: RGB) {
     const s = f.docScale;
@@ -341,92 +373,125 @@ export class UploadCanvas {
     const h = DOC_H * s;
     const top = f.docY - h / 2;
     const bot = f.docY + h / 2;
-    const R = this.zukoR(f);
+    const lineY = this.sweepY(f, wallTime);
+    const burn = this.burn(f);
+    const preview = f.dropped ? 0 : f.beam * f.docAlpha;
 
-    // Scan line: a slow preview bob while hovering, one top → bottom sweep after the drop.
-    const lineY = f.dropped
-      ? lerp(top + 3 * s, bot - 3 * s, f.scan)
-      : f.docY + Math.sin(wallTime * 4.5) * h * 0.36;
-
-    // The beam leaves the visor edge facing the file, once the two are apart.
+    // The jet: flame from the pointing fist to the page edge at the sweep.
     const side = f.docX >= f.x ? 1 : -1;
-    const ax = f.x + side * 0.66 * R * f.sx;
-    const ay = f.y + f.hop - 0.15 * R * f.sy;
-    const edge = f.docX - (side * w) / 2;
-    const beam = f.beam * f.docAlpha * clamp01((side * (edge - ax) - 4) / 10);
-
-    if (beam > 0.01) {
-      ctx.save();
-      const g = ctx.createLinearGradient(ax, 0, edge, 0);
-      g.addColorStop(0, rgba(col, 0.32 * beam));
-      g.addColorStop(1, rgba(col, 0.07 * beam));
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.moveTo(ax, ay - 1.5);
-      ctx.lineTo(edge, top);
-      ctx.lineTo(edge, bot);
-      ctx.lineTo(ax, ay + 1.5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = rgba(mix3(col, WHITE, 0.4), 0.7 * beam);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(edge, lineY);
-      ctx.stroke();
-      ctx.restore();
+    const fist = this.bot.fistPosition(side);
+    const ex = f.docX - (side * w) / 2;
+    if (fist && burn > 0.02 && side * (ex - fist.x) > 2) {
+      const n = 8;
+      const sx = fist.x + fist.dx * fist.r;
+      const sy = fist.y + fist.dy * fist.r;
+      const pts: number[] = [];
+      const hw: number[] = [];
+      for (let i = 0; i < n; i++) {
+        const k = i / (n - 1);
+        pts.push(lerp(sx, ex, k), lerp(sy, lineY, k) - Math.sin(Math.PI * k) * 3);
+        hw.push((1 + 2.4 * k) * s * (0.8 + 0.2 * burn));
+      }
+      flameRibbon(ctx, pts, hw, wallTime, FIRE_PAL, burn, 3);
+      glow(ctx, ex, lineY, 12 * s, FIRE_PAL.mid, 0.5 * burn);
     }
 
     ctx.save();
     ctx.globalAlpha = f.docAlpha;
-    drawDoc(ctx, f.docX, f.docY, s);
+    const burnY = f.dropped && f.scan > 0 ? lineY : null;
+    drawDoc(ctx, f.docX, f.docY, s, burnY);
 
-    if (beam > 0.01) {
-      // The part of the page already scanned takes a faint tint.
-      if (f.dropped && f.scan > 0) {
-        ctx.save();
-        docPath(ctx, f.docX, f.docY, s);
-        ctx.clip();
-        ctx.fillStyle = rgba(col, 0.18 * beam);
-        ctx.fillRect(f.docX - w / 2, top, w, lineY - top);
-        ctx.restore();
+    // Freshly burned lines still smoulder for a moment.
+    if (burnY != null) {
+      const x0 = f.docX - w / 2;
+      for (const [fy, fw, secret] of DOC_LINES) {
+        if (!secret) continue;
+        const ly = top + h * fy;
+        const age = ((burnY - ly) / (h - 6 * s)) * 0.55;
+        if (age <= 0 || age >= 0.45) continue;
+        const a = 1 - age / 0.45;
+        for (let i = 0; i < 3; i++) {
+          const fx = x0 + w * (0.2 + (fw * (i + 0.5)) / 3);
+          ember(ctx, fx, ly - age * 22 * s - i * 1.5, 1.6 * s, age / 0.45, FIRE_PAL);
+        }
+        glow(ctx, x0 + w * (0.18 + fw / 2), ly, w * 0.45, FIRE_PAL.mid, 0.35 * a);
       }
+    }
+
+    // The sweep itself: a band of fire across the page, licking upwards.
+    if (burn > 0.02 && f.scan < 1) {
       ctx.save();
-      ctx.shadowColor = rgba(col, beam);
+      docPath(ctx, f.docX, f.docY, s);
+      ctx.clip();
+      ctx.fillStyle = `rgba(242,138,30,${0.12 * burn})`;
+      ctx.fillRect(f.docX - w / 2, top, w, lineY - top);
+      ctx.restore();
+      const n = 9;
+      const pts: number[] = [];
+      for (let i = 0; i < n; i++) pts.push(lerp(f.docX + w / 2 + 2, f.docX - w / 2 - 2, i / (n - 1)), lineY);
+      glow(ctx, f.docX, lineY, w * 0.7, FIRE_PAL.mid, 0.35 * burn);
+      flameRibbon(ctx, pts, taper(n, 2.6 * s, 1), wallTime, FIRE_PAL, burn, 8);
+      const rnd = seeded(5);
+      for (let i = 0; i < 7; i++) {
+        const ph = (((wallTime * 1.8 + rnd()) % 1) + 1) % 1;
+        const px = f.docX - w / 2 + w * rnd();
+        ember(ctx, px, lineY - ph * 14 * s, 1.3 * s, ph, FIRE_PAL);
+      }
+    } else if (preview > 0.01) {
+      // While hovering close: a faint flicker of flame bobbing over the page.
+      ctx.save();
+      ctx.shadowColor = rgba(col, preview);
       ctx.shadowBlur = 6;
-      ctx.fillStyle = rgba(mix3(col, WHITE, 0.35), beam);
+      ctx.fillStyle = rgba(mix3(col, WHITE, 0.35), preview);
       rr(ctx, f.docX - w / 2 - 3, lineY - 0.9, w + 6, 1.8, 0.9);
       ctx.fill();
       ctx.restore();
     }
 
-    if (f.badge > 0.01) drawShieldCheck(ctx, f.docX + w / 2 - 3 * s, bot - 6 * s, 8.5 * s * f.badge);
+    if (f.badge > 0.01) drawFlameCheck(ctx, f.docX + w / 2 - 3 * s, bot - 6 * s, 8.5 * s * f.badge, wallTime);
     ctx.restore();
   }
 }
 
-// ── Shield-check badge ──────────────────────────────────────────────────────
+// ── Flame-shield check badge ────────────────────────────────────────────────
 
-/** A small shield with a check mark: the file passed Zuko's scan. */
-function drawShieldCheck(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+/** A small flame-orange shield with a check and a flame on top: the file passed Zuko's fire. */
+function drawFlameCheck(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, t: number) {
   if (r <= 0.3) return;
   ctx.save();
   ctx.translate(cx, cy);
+  // The flame peeking over the shield.
+  const fh = r * (1.15 + 0.12 * Math.sin(t * 9));
+  ctx.fillStyle = "#F05A14";
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.42, -r * 0.6);
+  ctx.quadraticCurveTo(-r * 0.5, -r * 0.6 - fh * 0.6, Math.sin(t * 5) * r * 0.08, -r * 0.6 - fh);
+  ctx.quadraticCurveTo(r * 0.5, -r * 0.6 - fh * 0.6, r * 0.42, -r * 0.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#FFC24D";
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.22, -r * 0.6);
+  ctx.quadraticCurveTo(-r * 0.25, -r * 0.6 - fh * 0.4, 0, -r * 0.6 - fh * 0.62);
+  ctx.quadraticCurveTo(r * 0.25, -r * 0.6 - fh * 0.4, r * 0.22, -r * 0.6);
+  ctx.closePath();
+  ctx.fill();
+
   const p = shieldPath(r);
-  ctx.lineWidth = Math.max(1, r * 0.34);
+  ctx.lineWidth = Math.max(1, r * 0.3);
   ctx.lineJoin = "round";
-  ctx.strokeStyle = "#0B0F17";
+  ctx.strokeStyle = "#2B1D1A";
   ctx.stroke(p);
   const g = ctx.createLinearGradient(0, -r, 0, r);
-  g.addColorStop(0, "#6EF0A0");
-  g.addColorStop(1, "#22B35E");
+  g.addColorStop(0, "#FFB347");
+  g.addColorStop(1, "#E0561A");
   ctx.fillStyle = g;
   ctx.fill(p);
   ctx.beginPath();
   ctx.moveTo(-r * 0.42, -r * 0.04);
   ctx.lineTo(-r * 0.1, r * 0.28);
   ctx.lineTo(r * 0.46, -r * 0.36);
-  ctx.strokeStyle = "#062012";
+  ctx.strokeStyle = "#FFF6E6";
   ctx.lineWidth = Math.max(1, r * 0.24);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -460,9 +525,10 @@ function docPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, sc: numb
 /**
  * The generic sheet with a folded corner and a few lines of text. macOS swaps
  * in the real file icon; Windows has no equivalent reachable from the webview,
- * so this is the shape in every case.
+ * so this is the shape in every case. Secret lines above `burnY` have been
+ * burned into placeholder blocks.
  */
-function drawDoc(ctx: CanvasRenderingContext2D, cx: number, cy: number, sc: number) {
+function drawDoc(ctx: CanvasRenderingContext2D, cx: number, cy: number, sc: number, burnY: number | null = null) {
   const w = DOC_W * sc;
   const h = DOC_H * sc;
   const x = cx - w / 2;
@@ -486,10 +552,21 @@ function drawDoc(ctx: CanvasRenderingContext2D, cx: number, cy: number, sc: numb
   ctx.fillStyle = "#D5D6DB";
   ctx.fill();
 
-  ctx.fillStyle = "#B4B9C3";
-  const lines: [number, number][] = [[0.3, 0.42], [0.43, 0.64], [0.54, 0.64], [0.65, 0.64], [0.76, 0.38]];
-  for (const [fy, fw] of lines) {
-    rr(ctx, x + w * 0.18, y + h * fy, w * fw, Math.max(1, h * 0.05), 1);
+  for (const [fy, fw, secret] of DOC_LINES) {
+    const ly = y + h * fy;
+    const lh = Math.max(1, h * 0.05);
+    if (secret && burnY != null && ly + lh / 2 < burnY) {
+      const bh = Math.max(2.6, h * 0.09);
+      rr(ctx, x + w * 0.15, ly + lh / 2 - bh / 2, w * (fw + 0.06), bh, bh / 2);
+      ctx.fillStyle = "#F28A1E";
+      ctx.fill();
+      ctx.lineWidth = Math.max(0.6, 0.7 * sc);
+      ctx.strokeStyle = "#B33A2E";
+      ctx.stroke();
+      continue;
+    }
+    ctx.fillStyle = "#B4B9C3";
+    rr(ctx, x + w * 0.18, ly, w * fw, lh, 1);
     ctx.fill();
   }
 }
