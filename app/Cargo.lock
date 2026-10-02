@@ -5981,6 +5981,7 @@ dependencies = [
  "libc",
  "serde_json",
  "windows 0.61.3",
+ "zuko-core",
 ]
 
 [[package]]
