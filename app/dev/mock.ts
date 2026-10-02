@@ -7,7 +7,7 @@
 // Island scenes: `index.html?mock=1&scene=<name>`, see SCENES below.
 
 import type {
-  ActivityItem, AuditVerifyResult, BootInfo, BridgeEventName, EntryView, EventMap, HookPreview,
+  ActivityItem, AuditVerifyResult, VaultInsight, BootInfo, BridgeEventName, EntryView, EventMap, HookPreview,
   HookStatus, InstallOptions, LocalAiConfig, LocalAiStatus, LocalAiTest, MaskTextResult, Policy,
   PrivacyEvent, ProtectionStatus, SanitizeResult, Tier, UnmaskTextResult, ZukoHookInfo,
 } from "../src/core/bridge";
@@ -125,7 +125,7 @@ const activity: ActivityItem[] = [
   item(4, "PermissionRequest", "Bash", "Remove-Item -Recurse -Force .\\dist", "approved", "high", 64,
     "DELETES the folder dist/ and everything in it"),
   item(5, "PreToolUse", "Write", ".env", "allow", "medium", 31,
-    "WRITES .env (filled API_KEY_1 locally)", { keys: ["API_KEY_1"] }),
+    "WRITES .env (filled API_KEY_1 locally)", { keys: ["API_KEY_1"], path: "C:\\Users\\dev\\shop-api\\.env" }),
   item(7, "PreToolUse", "Read", "~/.ssh/id_ed25519", "deny", "critical", 90,
     "READS your SSH private key (blocked path)", { rules: ["filesystem.blockedRead"] }),
   item(9, "PreToolUse", "WebFetch", "https://docs.stripe.com/api", "allow", "low", 12, "Fetches docs.stripe.com"),
@@ -313,6 +313,24 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     status.vaultSize = 0;
   },
   vault_reveal: (a) => vault.find((v) => v.key === a.key)?.value ?? null,
+  // Canned facts per kind (the real ones are computed in Rust from the stored value).
+  vault_insights: (a): VaultInsight[] | null => {
+    const e = vault.find((v) => v.key === a.key);
+    if (!e) return null;
+    const out: VaultInsight[] = [{ label: "Length", text: `${[...e.value].length} characters` }];
+    const by: Record<string, [string, string][]> = {
+      API_KEY: [["Vendor", e.value.startsWith("sk-ant") ? "Anthropic" : "OpenAI"], ["Key type", "API key"],
+        ["Strength", "Strong: long and random-looking (3 of 4 character types, about 4.6 bits per character)"]],
+      TOKEN: [["Vendor", "GitHub"], ["Key type", "Personal access token (classic)"],
+        ["Strength", "Strong: long and random-looking (3 of 4 character types, about 4.7 bits per character)"]],
+      CONN_STRING: [["Service", "PostgreSQL"], ["Credentials", "Contains a password"], ["Host", "This computer"]],
+      EMAIL: [["Mail provider", "Custom or work domain"], ["Top-level domain", ".io"], ["Name part", "12 characters before the @"]],
+      PHONE: [["Country", "Bangladesh (+880)"], ["Operator", "Grameenphone (mobile)"], ["Last four", "4471"]],
+    };
+    return [...out, ...(by[e.kind] ?? []).map(([label, text]) => ({ label, text }))];
+  },
+  vault_copy: (a) => vault.some((v) => v.key === a.key),
+  open_file: () => true,
   activity_recent: (a) => activity.slice(0, Number(a.limit) || 200),
   audit_verify: (): AuditVerifyResult => ({ ok: true, count: 1284, error: null }),
   mask_text: (a) => maskDemo(String(a.text)),

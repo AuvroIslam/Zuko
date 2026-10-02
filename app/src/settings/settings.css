@@ -665,6 +665,48 @@ table.table {
   margin-left: 4px;
 }
 
+/* Four buttons per vault row: let them wrap rather than widen the table. */
+.table td.actions .btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 250px;
+}
+
+.table td.actions .btns button + button {
+  margin-left: 0;
+}
+
+/* The Inspect panel: label/value facts under the row. */
+.table tr.inspect-row td {
+  padding-top: 0;
+}
+
+.inspect {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.inspect .facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 14px;
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.inspect dt {
+  color: var(--dim);
+}
+
+.inspect dd {
+  margin: 0;
+  color: #c9ccd2;
+}
+
 .table .what .hint {
   font-size: 11px;
 }

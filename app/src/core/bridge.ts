@@ -95,6 +95,9 @@ export const Bridge = {
   /** "Open terminal" → opens the folder in VS Code when `code` is on PATH. */
   openInVSCode: (path: string | null) => call<boolean>("open_in_vscode", { path }),
 
+  /** "Open file" on an activity row: VS Code (`code --goto`) or the file's folder. False when it did not open in VS Code. */
+  openFile: (path: string) => call<boolean>("open_file", { path }),
+
   quit: () => call<void>("quit_app"),
 
   openSettingsWindow: () => call<void>("open_settings_window"),
@@ -163,6 +166,10 @@ export const Bridge = {
   vaultClear: () => callOrThrow<void>("vault_clear"),
   /** The real value. Only ever called from an explicit click on Reveal. */
   vaultReveal: (key: string) => callOrThrow<string | null>("vault_reveal", { key }),
+  /** Non-sensitive facts about a stored value (computed locally); null if the key is gone. */
+  vaultInsights: (key: string) => callOrThrow<VaultInsight[] | null>("vault_insights", { key }),
+  /** Copies the value to the clipboard on the Rust side (it never reaches the webview) and clears it after 30 s if unchanged. False if the key is gone. */
+  vaultCopy: (key: string) => callOrThrow<boolean>("vault_copy", { key }),
 
   // ── Activity and audit ────────────────────────────────────────────────────
   /** Newest first. */
@@ -297,6 +304,14 @@ export interface ActivityItem {
   keys: string[];
   /** Local AI explanation (display only), when one arrived for this item. */
   aiExplanation?: string;
+  /** Absolute path of the file a Write/Edit/MultiEdit/NotebookEdit call targets ("Open file"). Live items only. */
+  path?: string;
+}
+
+/** One non-sensitive fact about a vault value (never the value itself). */
+export interface VaultInsight {
+  label: string;
+  text: string;
 }
 
 export interface SanitizeFinding {

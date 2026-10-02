@@ -26,6 +26,7 @@ use zuko_core::localai::LocalAiConfig;
 use zuko_core::policy::Policy;
 use zuko_core::vault::EntryView;
 
+use crate::clipcopy;
 use crate::engine::{self, Engine};
 use crate::events::{self, ActivityItem, PrivacyNote};
 use crate::hooks::{self, HookPreview, InstallOptions};
@@ -296,6 +297,30 @@ pub fn vault_reveal(engine: State<Engine>, key: String) -> Option<String> {
     let value = engine.with_vault(|v| v.get(&key).map(|e| e.value.clone()))?;
     audit_note(&engine, "Vault", "reveal", &format!("Revealed {key} in the settings window"), "info", vec![key]);
     Some(value)
+}
+
+/// Facts about a stored value (brand, country, vendor, expiry...), computed locally and
+/// shown to the person at the keyboard. Never the value itself; see `zuko_core::insights`.
+#[tauri::command]
+pub fn vault_insights(engine: State<Engine>, key: String) -> Option<Vec<zuko_core::insights::Insight>> {
+    engine.with_vault(|v| v.get(&key).map(|e| zuko_core::insights::insights(e, engine::now())))
+}
+
+/// Copies a stored value to the clipboard from the Rust side (it never reaches the
+/// webview) and clears the clipboard 30 s later if it still holds that value. Only called
+/// from an explicit click; the audit receipt names the key, never the value.
+#[tauri::command]
+pub async fn vault_copy(app: AppHandle, engine: State<'_, Engine>, key: String) -> Result<bool, String> {
+    let Some(value) = engine.with_vault(|v| v.get(&key).map(|e| e.value.clone())) else { return Ok(false) };
+    let clip = std::sync::Arc::new(clipcopy::SystemClip(app));
+    // The clipboard plugin talks to the OS, so keep it off the UI thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        clipcopy::copy_and_arm(clip, clipcopy::generation().clone(), value, clipcopy::CLEAR_AFTER)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    audit_note(&engine, "VaultCopy", "vault", &format!("Copied {key} to the clipboard (clears in 30 s)"), "info", vec![key]);
+    Ok(true)
 }
 
 // ── Activity and audit ────────────────────────────────────────────────────────
