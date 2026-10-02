@@ -256,16 +256,28 @@ Evaluation order: **self-protection → deny → taint invariants → ask → ri
 | Phase | Deliverable | Status |
 |---|---|---|
 | 0 | Repo, toolchain (Rust GNU + MinGW), research, this plan | done |
-| 1 | Rebrand identifiers, remove integrations, `zuko-core` skeleton with fixed APIs | |
-| 2 | `zuko-core`: detection, vault, masking, streaming, Anthropic transforms | |
-| 3 | `zuko-core`: shell analyzer, actions, policy, risk, taint, guard, hook I/O, audit | |
-| 4 | App: request/response pipe, guard state, relay fallback, hook installer (events, env, deny rules), vault and audit stores | |
-| 5 | App: Zuko Gateway (proxy, SSE rehydration, token auth, upstream chaining) | |
-| 6 | UI: Zuko character, synth sounds, icon, risk approval card with hold-to-approve, activity feed, privacy toasts, settings (Protection, Policy, Vault, Activity, Browser) | |
-| 7 | Documents: sanitizer (txt/md/pdf), clipboard mask/unmask, private chat | |
-| 8 | Browser extension + WASM build + native host | |
-| 9 | Tests: core unit tests, attack/safe/near-miss benchmark with false-positive rate, gateway tests against a mock SSE upstream, relay tests, real end-to-end runs with `claude -p` through the gateway | |
-| 10 | Adversarial review pass (security and correctness), fixes, README | |
+| 1 | Rebrand identifiers, remove integrations, `zuko-core` skeleton with fixed APIs | done |
+| 2 | `zuko-core`: detection, vault, masking, streaming, Anthropic transforms | done: 51 secret rules + PII, 0 false positives on the fixture corpus, 1 MB scanned in about 50 ms |
+| 3 | `zuko-core`: shell analyzer, actions, policy, risk, taint, guard, hook I/O, audit | done: 51-scenario benchmark, 100% detection, 0% false blocks, about 0.3 ms per decision |
+| 4 | App: request/response pipe, guard state, relay fallback, installer (hooks, gateway env, deny rules), vault and audit stores | done |
+| 5 | App: Zuko Gateway (proxy, SSE rehydration, token auth, upstream chaining) | done |
+| 6 | UI: Zuko character, synth sounds, icon, risk approval card with hold-to-approve, activity feed, privacy notices, settings | done |
+| 7 | Documents: sanitizer (txt/md/pdf/code), clipboard mask/unmask (Ctrl+Alt+M / U), masked chat | done |
+| 8 | Browser extension + WASM engine + native host | done (128 tests); still needs a manual check in a real Chrome/Edge on the live sites |
+| 9 | Tests and real end-to-end runs | done (see below) |
+| 10 | Security review and fixes, README | done for the pipe trust boundary (only Zuko's own binaries may talk to the app); further review welcome |
+
+### Verified end to end (real Claude Code CLI, real app, fake secrets)
+1. **Gateway mode:** a prompt carrying `sk-proj-…` reached the provider as `{{API_KEY_1}}`. The agent wrote `OPENAI_API_KEY={{API_KEY_1}}`, and `.env` on disk got the real key. The audit log shows `Gateway masked [API_KEY_1]`, then `PreToolUse Write allow`.
+2. **Firewall:** `curl https://pastebin.com/...` was denied by `PreToolUse` (`network.blocked:pastebin.com`). The agent was told why and adapted.
+3. **Hooks-only mode:** a prompt carrying a Stripe key was blocked before it was sent, and a masked copy (`{{API_KEY_2}}`) was offered for resending.
+4. **Relay without the app:** the stateless fallback still denies blocked domains, `rm -rf ~`, reads of `~/.ssh` and edits to Claude Code's settings, in about 13–33 ms.
+
+### Still to do / manual checks
+- Load the extension in a real Chrome or Edge and check ChatGPT, claude.ai and DeepSeek. Site DOMs and endpoints drift.
+- Build and test the NSIS installer (`npm run pack`), and do a Linux build.
+- An "Always allow" from the island is treated as a single allow; it could write a Claude Code permission rule (`updatedPermissions`).
+- PostToolUse output too large to mask within the 1.5 s budget passes through unmasked (gateway mode still masks it upstream).
 
 ## 13. Testing strategy
 - **Unit tests** (`cargo test -p zuko-core`): detector corpus (true and false positives), mask→rehydrate round trips, streaming rehydration split at *every* byte position, policy glob and domain matching on Windows paths, shell analysis cases.
