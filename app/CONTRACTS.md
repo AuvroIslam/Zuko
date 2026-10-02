@@ -158,7 +158,7 @@ interface LocalAiConfig {
   deepScanDocuments: boolean;  // default true
   explainRisk: boolean;        // default true
   waitForPromptScan: boolean;  // default false: gateway waits ≤ timeoutMs for the newest prompt's scan
-  timeoutMs: number;           // default 8000, 500..120000
+  timeoutMs: number;           // default 20000, 500..120000
 }
 
 interface LocalAiStatus {

@@ -75,7 +75,7 @@ impl Default for LocalAiConfig {
             deep_scan_documents: true,
             explain_risk: true,
             wait_for_prompt_scan: false,
-            timeout_ms: 8000,
+            timeout_ms: 20000,
         }
     }
 }
@@ -441,7 +441,7 @@ mod tests {
         let c = LocalAiConfig::default();
         assert!(!c.enabled && !c.scans_prompts() && !c.scans_documents() && !c.explains());
         assert!(c.deep_scan_prompts && c.deep_scan_documents && c.explain_risk && !c.wait_for_prompt_scan);
-        assert_eq!((c.endpoint.as_str(), c.model.as_str(), c.timeout_ms), (DEFAULT_ENDPOINT, DEFAULT_MODEL, 8000));
+        assert_eq!((c.endpoint.as_str(), c.model.as_str(), c.timeout_ms), (DEFAULT_ENDPOINT, DEFAULT_MODEL, 20000));
         let p = crate::policy::Policy::from_json(r#"{"version":1,"mode":"enforce"}"#).unwrap();
         assert_eq!(p.local_ai, LocalAiConfig::default());
         let p = crate::policy::Policy::from_json(r#"{"localAi":{"enabled":true}}"#).unwrap();

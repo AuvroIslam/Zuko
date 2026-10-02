@@ -75,7 +75,7 @@ function defaultPolicy(): Policy {
     localAi: {
       enabled: false, endpoint: "http://127.0.0.1:11434", model: "gemma3:4b",
       deepScanPrompts: true, deepScanDocuments: true, explainRisk: true,
-      waitForPromptScan: false, timeoutMs: 8000,
+      waitForPromptScan: false, timeoutMs: 20000,
     },
   };
 }
