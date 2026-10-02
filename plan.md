@@ -281,6 +281,9 @@ Evaluation order: **self-protection → deny → taint invariants → ask → ri
 - Hooks fail open by Claude Code's design. Gateway mode plus `permissions.deny` rules are the hard floor.
 - The web extension depends on sites' private APIs and DOM, which change. Enforcement sits at the network layer so DOM drift breaks display, not protection.
 - PDFs: text only (no images or OCR); output is markdown, not a redacted PDF.
+- Some Claude Code traffic skips any gateway. `/bug`, `/feedback`, `/share` and the session survey upload transcripts straight to Anthropic, and in gateway mode the local transcript holds rehydrated values. Zuko sets `DISABLE_BUG_COMMAND=1` and `DISABLE_ERROR_REPORTING=1` when it installs the gateway and tells you why.
+- A trusted project's `.claude/settings.json` can set its own `ANTHROPIC_BASE_URL` and route around the gateway. The relay reports the session's real base URL on every event, and Zuko warns when a session is not using the gateway. Only managed (admin) settings can fully prevent the override.
+- Rehydration is a privileged sink. Zuko fills real values automatically only into local file writes. Shell commands get them through `PreToolUse` only when they have no network egress. WebFetch and MCP calls never get them. This stops a prompt injection from using Zuko itself to send a secret out.
 
 ## 15. Dev setup (Windows)
 - Rust (installed: GNU host, `stable-x86_64-pc-windows-gnu`) plus MinGW-w64 (WinLibs) for C deps and `windres`. Add `%USERPROFILE%\.cargo\bin` to PATH.
