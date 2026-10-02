@@ -485,6 +485,17 @@ const SCENES: Record<string, (island: Island) => void> = {
     working();
     island.collapse();
   },
+  // A block while the island is compact: the fireball flies along the bar.
+  "fire-compact": (island) => {
+    working();
+    island.collapse();
+    window.setTimeout(() => emit("hook", {
+      session_id: "s-7f3a", cwd: "C:\\dev\\shop-api", hook_event_name: "PreToolUse", tool_name: "Bash",
+      tool_input: { command: "cat ~/.ssh/id_ed25519" },
+      zuko: zuko("critical", "READS your SSH private key (blocked path)", [], { verdict: "deny" }),
+    }), 300);
+    freezeFire(island, 0.38, 1300);
+  },
   // An agent at work: Zuko hovers on his ring of fire.
   "fire-ring": (island) => {
     State.isPinned = true;

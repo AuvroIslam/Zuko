@@ -2129,7 +2129,7 @@ export class BotEngine {
     const from = it.from;
     const to = it.target ?? { x: from.x + Math.cos(it.ang) * it.dist, y: from.y + Math.sin(it.ang) * it.dist };
     const dist = Math.hypot(to.x - from.x, to.y - from.y);
-    const arc = Math.min(20, dist * 0.09);
+    const arc = Math.min(20, dist * 0.09, u * 1.5);
     const s = clamp(u * 0.36, 3.2, 10);
     const at = (k: number): [number, number] => [
       lerp(from.x, to.x, k), lerp(from.y, to.y, k) - Math.sin(Math.PI * k) * arc,
