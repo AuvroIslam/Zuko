@@ -11,6 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 serde_json = "1"
+# The stateless policy fallback used when the app is unreachable: the very same
+# guard the app runs, minus the session ledger and the vault.
+zuko-core = { path = "../core" }
 
 # Just enough Win32 to know our own SID and to check who is serving the pipe.
 [target.'cfg(windows)'.dependencies]
