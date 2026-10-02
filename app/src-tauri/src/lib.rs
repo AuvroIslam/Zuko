@@ -1,9 +1,8 @@
-// Coucou for Windows — app wiring and the commands the island calls.
+// Zuko for Windows — app wiring and the commands the island calls.
 
 mod claude;
 mod files;
 mod hooks;
-mod integrations;
 mod island;
 mod log;
 mod pipe;
@@ -69,13 +68,13 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
         (screen_changed, autostart_changed)
     };
     if let Err(err) = settings::save(&settings) {
-        eprintln!("[coucou] could not save settings: {err}");
+        eprintln!("[zuko] could not save settings: {err}");
     }
     if autostart_changed {
         let manager = app.autolaunch();
         let result = if settings.autostart { manager.enable() } else { manager.disable() };
         if let Err(err) = result {
-            eprintln!("[coucou] autostart: {err}");
+            eprintln!("[zuko] autostart: {err}");
         }
     }
     if screen_changed {
@@ -170,11 +169,11 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
-/// Tray → Pause. Paused means paused: the pollers stop talking to the network,
-/// not just the island stopping showing things.
+/// Tray → Pause. The island declines approvals while paused; protection itself
+/// (policy, masking) keeps running.
 #[tauri::command]
 fn set_paused(paused: bool) {
-    integrations::set_paused(paused);
+    log::line(format!("paused: {paused}"));
 }
 
 // ── Claude Code hooks ─────────────────────────────────────────────────────────
@@ -272,20 +271,6 @@ fn secret_clear(key: String) -> Result<(), String> {
     secrets::clear(&key)
 }
 
-/// Opens the configured n8n instance — the URL lives in the Credential Manager.
-#[tauri::command]
-fn open_n8n() {
-    if let Some(url) = secrets::get("n8n-url") {
-        open_url(url);
-    }
-}
-
-/// Refresh buttons in the integration cards.
-#[tauri::command]
-async fn refresh_integration(app: AppHandle, id: String) {
-    integrations::poll_once(app, &id).await;
-}
-
 /// Lets the island write to the same log as the Rust side.
 #[tauri::command]
 fn log_line(message: String) {
@@ -321,7 +306,7 @@ fn create_settings_window(app: &AppHandle) {
     let url = settings_page_url(app);
     match WebviewWindowBuilder::new(app, "settings", url)
         .additional_browser_args(BROWSER_ARGS)
-        .title("Settings — Coucou")
+        .title("Settings — Zuko")
         .inner_size(560.0, 680.0)
         .min_inner_size(460.0, 480.0)
         .resizable(true)
@@ -397,8 +382,6 @@ pub fn run() {
             secret_present,
             secret_set,
             secret_clear,
-            refresh_integration,
-            open_n8n,
             open_settings_window,
             set_paused,
         ])
@@ -422,12 +405,11 @@ pub fn run() {
             gate.set_active(true);
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
-            log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
+            log::line(format!("--- Zuko {} started ---", env!("CARGO_PKG_VERSION")));
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
-            integrations::start(handle.clone());
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Coucou");
+        .expect("error while running Zuko");
 }

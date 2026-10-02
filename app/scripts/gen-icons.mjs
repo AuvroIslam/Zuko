@@ -1,4 +1,4 @@
-// Draws Mochi into the PNG/ICO set Tauri needs. No dependencies: the icons are
+// Draws Zuko into the PNG/ICO set Tauri needs. No dependencies: the icons are
 // rasterised here and encoded with node:zlib, so the app icon stays "drawn in
 // code" like the character itself.
 //
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "src-tauri", "icons");
 
-// ── Mochi ─────────────────────────────────────────────────────────────────────
+// ── Zuko ─────────────────────────────────────────────────────────────────────
 
 const BASE_TOP = [255, 250, 245]; // #FFFAF5
 const BASE_BOTTOM = [221, 204, 191]; // #DDCCBF
@@ -35,7 +35,7 @@ function insidePill(x, y, w, h) {
   return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
 }
 
-function renderMochi(size) {
+function renderZuko(size) {
   const px = new Uint8Array(size * size * 4);
   const R = size * 0.34;
   const rx = R * 1.14;
@@ -182,7 +182,7 @@ function encodeICO(entries) {
 
 mkdirSync(OUT, { recursive: true });
 
-const png = (size) => encodePNG(size, renderMochi(size));
+const png = (size) => encodePNG(size, renderZuko(size));
 
 const files = {
   "32x32.png": png(32),

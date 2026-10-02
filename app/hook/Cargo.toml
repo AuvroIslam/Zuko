@@ -1,12 +1,12 @@
 [package]
-name = "coucou-hook"
-description = "Relays Claude Code hook events to Coucou over a named pipe (Windows) or a Unix socket (Linux)"
+name = "zuko-hook"
+description = "Relays Claude Code hook events to Zuko over a named pipe (Windows) or a Unix socket (Linux)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "coucou-hook"
+name = "zuko-hook"
 path = "src/main.rs"
 
 [dependencies]

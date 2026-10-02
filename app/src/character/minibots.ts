@@ -1,4 +1,4 @@
-// Mini Mochis (pills + compact grid) — port of MiniBotCanvasView.
+// Mini Zukos (pills + compact grid) — port of MiniBotCanvasView.
 // Each canvas owns a BotEngine; the island's frame loop ticks every live one.
 
 import { BotEngine, hexToRGB } from "./engine";
@@ -14,7 +14,7 @@ interface MiniBot {
 const live = new Map<HTMLCanvasElement, MiniBot>();
 
 /**
- * Creates a mini Mochi whose **body** is `bodySize` CSS pixels across.
+ * Creates a mini Zuko whose **body** is `bodySize` CSS pixels across.
  *
  * The engine draws the body at 60 % of its canvas, so the canvas is
  * `bodySize / 0.6` and is centred in a `bodySize` slot, overflowing it — the

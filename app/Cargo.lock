@@ -609,33 +609,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "coucou"
-version = "0.1.1"
-dependencies = [
- "gtk",
- "keyring",
- "libc",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-single-instance",
- "tokio",
- "windows 0.61.3",
-]
-
-[[package]]
-name = "coucou-hook"
-version = "0.1.1"
-dependencies = [
- "libc",
- "serde_json",
- "windows 0.61.3",
-]
-
-[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5711,6 +5684,45 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zuko"
+version = "0.1.1"
+dependencies = [
+ "gtk",
+ "keyring",
+ "libc",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-single-instance",
+ "tokio",
+ "windows 0.61.3",
+]
+
+[[package]]
+name = "zuko-core"
+version = "0.1.1"
+dependencies = [
+ "aho-corasick",
+ "base64 0.22.1",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "zuko-hook"
+version = "0.1.1"
+dependencies = [
+ "libc",
+ "serde_json",
+ "windows 0.61.3",
+]
 
 [[package]]
 name = "zvariant"
