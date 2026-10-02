@@ -40,7 +40,7 @@ export const ENDPOINTS: Record<SiteId, Endpoints> = {
     upload: [
       (u, m) => m !== "GET" && /^\/backend-api\/files(?:\/|$)/.test(u.pathname),
       // Blob storage PUT after /backend-api/files hands out an upload URL.
-      (u, m) => m === "PUT" && /(?:blob\.core\.windows\.net|oaiusercontent\.com|openaiusercontent\.com)$/.test(u.hostname),
+      (u, m) => m === "PUT" && /(?:^|\.)(?:blob\.core\.windows\.net|oaiusercontent\.com|openaiusercontent\.com)$/.test(u.hostname),
     ],
   },
   claude: {

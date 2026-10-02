@@ -29,12 +29,14 @@ const isObj = (v: unknown): v is Record<string, any> => typeof v === "object" &&
 function stringField(holder: Record<string, any> | any[], key: string | number): BodyField | null {
   const v = (holder as any)[key];
   if (typeof v !== "string") return null;
-  return {
+  const field: BodyField = {
     text: v,
     set(value) {
       (holder as any)[key] = value;
+      field.text = value; // later steps (the note) must build on the masked text, not the original
     },
   };
+  return field;
 }
 
 const chatgpt: SiteRewriter = {
