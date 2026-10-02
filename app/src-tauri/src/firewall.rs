@@ -203,8 +203,9 @@ fn pre_tool_use(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
     let input = payload.get("tool_input").cloned().unwrap_or_else(|| json!({}));
     let sid = session_id(payload);
     let cwd = str_at(payload, "cwd");
-    let policy = engine.policy();
-    let det = engine.detector();
+    // The global policy with the project's .zuko/policy.json layered on top.
+    let policy = engine.policy_for(cwd);
+    let det = engine.detector_for(cwd);
     let ctx = engine.ctx(cwd, facts.gateway_active(payload));
     // A copy, so the ledger lock is never held together with the vault lock.
     let vault = engine.vault_snapshot();
@@ -322,8 +323,9 @@ fn post_tool_use(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
     let response = payload.get("tool_response").cloned().unwrap_or(Value::Null);
     let sid = session_id(payload);
     let cwd = str_at(payload, "cwd");
-    let policy = engine.policy();
-    let det = engine.detector();
+    // The global policy with the project's .zuko/policy.json layered on top.
+    let policy = engine.policy_for(cwd);
+    let det = engine.detector_for(cwd);
     let gateway_active = facts.gateway_active(payload);
     let ctx = engine.ctx(cwd, gateway_active);
     let action = zuko_core::action::from_tool_call(tool, &input, &ctx);
@@ -417,8 +419,9 @@ fn user_prompt(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
     let prompt = str_at(payload, "prompt");
     let sid = session_id(payload);
     let cwd = str_at(payload, "cwd");
-    let policy = engine.policy();
-    let det = engine.detector();
+    // The global policy with the project's .zuko/policy.json layered on top.
+    let policy = engine.policy_for(cwd);
+    let det = engine.detector_for(cwd);
     let mctx = MaskCtx { source: "hook".into(), now: engine::now() };
 
     if facts.gateway_active(payload) {
@@ -616,8 +619,9 @@ fn session_start(engine: &Engine, payload: &Value) -> Outcome {
 pub fn permission_info_for(engine: &Engine, facts: &Facts, payload: &Value) -> Option<Value> {
     let tool = payload.get("tool_name").and_then(Value::as_str)?;
     let input = payload.get("tool_input").cloned().unwrap_or_else(|| json!({}));
-    let policy = engine.policy();
-    let det = engine.detector();
+    let cwd = str_at(payload, "cwd");
+    let policy = engine.policy_for(cwd);
+    let det = engine.detector_for(cwd);
     let ctx = engine.ctx(str_at(payload, "cwd"), facts.gateway_active(payload));
     let vault = engine.vault_snapshot();
     let d = engine.with_ledger(session_id(payload), |ledger| {
@@ -634,8 +638,9 @@ pub fn permission_outcome(engine: &Engine, payload: &Value, info: Option<&Value>
     let input = payload.get("tool_input").cloned().unwrap_or_else(|| json!({}));
     let sid = session_id(payload);
     let cwd = str_at(payload, "cwd");
-    let policy = engine.policy();
-    let det = engine.detector();
+    // The global policy with the project's .zuko/policy.json layered on top.
+    let policy = engine.policy_for(cwd);
+    let det = engine.detector_for(cwd);
     let vault = engine.vault_snapshot();
     let ctx = engine.ctx(cwd, false);
     let action = zuko_core::action::from_tool_call(tool, &input, &ctx);
