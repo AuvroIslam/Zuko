@@ -673,3 +673,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
+
+// ── Zuko protection install (hooks + gateway env + deny rules) ───────────────
+//
+// OWNER: hook path (wave 2). `InstallOptions` decides which of Zuko's three
+// pieces end up in ~/.claude/settings.json; every write still goes through the
+// preview → fingerprint → dated backup → atomic rename flow above, and
+// uninstalling restores what was there before (including a previous
+// ANTHROPIC_BASE_URL). Stubs until then map onto the hooks-only flow.
+
+#[derive(Clone, Copy, Debug, Default, Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallOptions {
+    /// Zuko's hook entries.
+    pub hooks: bool,
+    /// env.ANTHROPIC_BASE_URL → the Zuko gateway (plus privacy env vars).
+    pub gateway: bool,
+    /// Policy blocked paths/domains mirrored into permissions.deny.
+    pub deny_rules: bool,
+}
+
+/// What is currently installed: (hooks, gateway, deny rules).
+pub fn installed_options() -> InstallOptions {
+    InstallOptions { hooks: status().installed, gateway: false, deny_rules: false }
+}
+
+pub fn preview_options(options: &InstallOptions) -> Result<HookPreview, String> {
+    preview(options.hooks)
+}
+
+pub fn write_options(options: &InstallOptions, fingerprint: &str) -> Result<String, String> {
+    write(options.hooks, fingerprint)
+}

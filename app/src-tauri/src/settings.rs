@@ -5,13 +5,12 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub sound_enabled: bool,
     pub sound_volume: f64,
     pub auto_close_interval: f64,
     pub absence_interval: f64,
-    pub active_integrations: Vec<String>,
     /// "primary" = the main display, "cursor" = whichever display the mouse is on.
     pub screen: String,
     pub autostart: bool,
@@ -33,12 +32,6 @@ impl Default for Settings {
             sound_volume: 0.12,
             auto_close_interval: 15.0,
             absence_interval: 180.0,
-            active_integrations: vec![
-                "integration_resend".into(),
-                "integration_n8n".into(),
-                "integration_vercel".into(),
-                "integration_github".into(),
-            ],
             screen: "primary".into(),
             autostart: false,
             hooks_installed: false,

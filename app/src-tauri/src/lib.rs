@@ -1,15 +1,24 @@
 // Zuko for Windows — app wiring and the commands the island calls.
 
+mod auditlog;
 mod claude;
+mod commands;
+mod engine;
+mod events;
 mod files;
+mod firewall;
+mod gateway;
 mod hooks;
 mod island;
 mod log;
 mod pipe;
 mod platform;
+mod policystore;
+mod sanitize;
 mod secrets;
 mod settings;
 mod tray;
+mod vaultstore;
 
 use std::process::Command;
 use std::sync::atomic::Ordering;
@@ -359,6 +368,7 @@ pub fn run() {
         })
         .manage(Pending::default())
         .manage(Chat::default())
+        .manage(engine::Engine::load())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
@@ -384,6 +394,26 @@ pub fn run() {
             secret_clear,
             open_settings_window,
             set_paused,
+            commands::protection_status,
+            commands::protection_preview,
+            commands::protection_apply,
+            commands::policy_get,
+            commands::policy_set,
+            commands::policy_reset,
+            commands::vault_list,
+            commands::vault_add,
+            commands::vault_forget,
+            commands::vault_clear,
+            commands::vault_reveal,
+            commands::activity_recent,
+            commands::audit_verify,
+            commands::audit_open_folder,
+            commands::mask_text,
+            commands::unmask_text,
+            commands::sanitize_file,
+            commands::reveal_path,
+            commands::clipboard_mask,
+            commands::clipboard_unmask,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -408,6 +438,7 @@ pub fn run() {
             log::line(format!("--- Zuko {} started ---", env!("CARGO_PKG_VERSION")));
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
+            gateway::start(handle.clone());
             Ok(())
         })
         .run(tauri::generate_context!())
