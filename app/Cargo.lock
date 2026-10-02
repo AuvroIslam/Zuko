@@ -6360,6 +6360,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zuko-native-host"
+version = "0.1.1"
+dependencies = [
+ "libc",
+ "serde_json",
+ "windows 0.61.3",
+]
+
+[[package]]
 name = "zune-core"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

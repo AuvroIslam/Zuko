@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zuko</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/icon-48.png" alt="" width="36" height="36" />
+      <div class="title">
+        <h1>Zuko</h1>
+        <p id="version">privacy guard for AI chats</p>
+      </div>
+    </header>
+
+    <section aria-labelledby="h-status">
+      <h2 id="h-status">Status</h2>
+      <div class="row" id="row-engine">
+        <span class="dot" id="dot-engine"></span>
+        <span class="label">Engine</span>
+        <span class="value" id="val-engine">checking...</span>
+      </div>
+      <div class="row" id="row-desktop">
+        <span class="dot" id="dot-desktop"></span>
+        <span class="label">Desktop app</span>
+        <span class="value" id="val-desktop">checking...</span>
+        <button type="button" id="btn-relink" class="link" hidden>Retry</button>
+      </div>
+      <p class="hint" id="hint" hidden></p>
+    </section>
+
+    <section aria-labelledby="h-sites">
+      <h2 id="h-sites">Protected sites</h2>
+      <div id="sites"></div>
+    </section>
+
+    <section aria-labelledby="h-stats">
+      <h2 id="h-stats">This session</h2>
+      <div class="stats">
+        <div><b id="n-masked">0</b><span>items masked</span></div>
+        <div><b id="n-blocked">0</b><span>requests blocked</span></div>
+        <div><b id="n-uploads">0</b><span>files checked</span></div>
+        <div><b id="n-restored">0</b><span>values restored</span></div>
+      </div>
+      <div class="row vault">
+        <span class="label">Values in the session vault</span>
+        <span class="value" id="n-vault">0</span>
+        <button type="button" id="btn-clear" class="link danger">Forget</button>
+      </div>
+    </section>
+
+    <footer>Press <kbd>Alt</kbd>+<kbd>R</kbd> on a chat page to show or hide restored values.</footer>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
