@@ -1,0 +1,27 @@
+# Local reference material — never committed
+coucou/
+comp_rules.md
+inspiration.md
+
+# Dependencies and build output
+node_modules/
+target/
+dist/
+release/
+*.tsbuildinfo
+app/src-tauri/gen/schemas/
+
+# Local secrets and overrides
+.env
+.env.*
+!.env.example
+*.vault
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code local state
+.claude/
