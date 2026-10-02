@@ -1784,23 +1784,26 @@ fn email_hint(domain: &str) -> String {
     "Work or custom-domain email address".into()
 }
 
-fn bd_operator_hint(local: &str) -> String {
-    // `local` is the 10-digit national number starting with `1`.
-    let op = match local.as_bytes().get(1) {
+/// Mobile operator for the 10-digit Bangladeshi national number `local` (starts with `1`).
+pub(crate) fn bd_operator(local: &str) -> Option<&'static str> {
+    match local.as_bytes().get(1) {
         Some(b'3') | Some(b'7') => Some("Grameenphone"),
         Some(b'4') | Some(b'9') => Some("Banglalink"),
         Some(b'5') => Some("Teletalk"),
         Some(b'6') => Some("Airtel"),
         Some(b'8') => Some("Robi"),
         _ => None,
-    };
-    match op {
+    }
+}
+
+fn bd_operator_hint(local: &str) -> String {
+    match bd_operator(local) {
         Some(o) => format!("Bangladesh mobile number ({o})"),
         None => "Bangladesh mobile number".into(),
     }
 }
 
-const CALLING_CODES: &[(&str, &str)] = &[
+pub(crate) const CALLING_CODES: &[(&str, &str)] = &[
     ("880", "Bangladesh"), ("852", "Hong Kong"), ("886", "Taiwan"), ("966", "Saudi Arabia"), ("971", "United Arab Emirates"),
     ("974", "Qatar"), ("977", "Nepal"), ("965", "Kuwait"), ("968", "Oman"), ("973", "Bahrain"), ("960", "Maldives"),
     ("975", "Bhutan"), ("234", "Nigeria"), ("254", "Kenya"), ("353", "Ireland"), ("351", "Portugal"), ("358", "Finland"),
@@ -1873,11 +1876,11 @@ const IBAN_LENGTHS: &[(&str, usize)] = &[
     ("TL", 23), ("TN", 24), ("TR", 26), ("UA", 29), ("VA", 22), ("VG", 24), ("XK", 20),
 ];
 
-fn iban_length(country: &str) -> Option<usize> {
+pub(crate) fn iban_length(country: &str) -> Option<usize> {
     IBAN_LENGTHS.iter().find(|(c, _)| *c == country).map(|(_, l)| *l)
 }
 
-fn country_name(code: &str) -> Option<&'static str> {
+pub(crate) fn country_name(code: &str) -> Option<&'static str> {
     Some(match code {
         "DE" => "Germany", "GB" => "United Kingdom", "FR" => "France", "ES" => "Spain", "IT" => "Italy",
         "NL" => "Netherlands", "BE" => "Belgium", "CH" => "Switzerland", "AT" => "Austria", "IE" => "Ireland",
@@ -1891,7 +1894,7 @@ fn country_name(code: &str) -> Option<&'static str> {
     })
 }
 
-fn ipv4_public(ip: std::net::Ipv4Addr) -> bool {
+pub(crate) fn ipv4_public(ip: std::net::Ipv4Addr) -> bool {
     let o = ip.octets();
     !(ip.is_private()
         || ip.is_loopback()
@@ -1907,7 +1910,7 @@ fn ipv4_public(ip: std::net::Ipv4Addr) -> bool {
         || (o[0] == 192 && o[1] == 0 && o[2] == 0))
 }
 
-fn ipv6_public(ip: std::net::Ipv6Addr) -> bool {
+pub(crate) fn ipv6_public(ip: std::net::Ipv6Addr) -> bool {
     if let Some(v4) = ip.to_ipv4_mapped() {
         return ipv4_public(v4);
     }
@@ -1920,7 +1923,7 @@ fn ipv6_public(ip: std::net::Ipv6Addr) -> bool {
 // Secret hints
 // ---------------------------------------------------------------------------------------
 
-fn scheme_name(scheme: &str) -> &'static str {
+pub(crate) fn scheme_name(scheme: &str) -> &'static str {
     let s = scheme.trim_start_matches("jdbc:");
     match s {
         "postgres" | "postgresql" => "PostgreSQL",

@@ -15,6 +15,7 @@
 
 use crate::detect::{Category, Finding};
 use crate::placeholder;
+pub use crate::insights::{insights, Insight};
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, AhoCorasickKind, MatchKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};

@@ -365,6 +365,7 @@ fn pre_tool_use(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
         rules: rules.clone(),
         keys: keys.clone(),
         ai_explanation: None,
+        path: edited_path(tool, &input, cwd),
     }));
     if !d.rehydrated.is_empty() {
         out.events.push(UiEvent::Privacy(PrivacyEvent {
@@ -502,6 +503,7 @@ fn post_tool_use(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
         rules: Vec::new(),
         keys: report.keys.clone(),
         ai_explanation: None,
+        path: None,
     }));
     out.receipts.push(Receipt {
         ts: engine::now(),
@@ -594,6 +596,7 @@ probably a project setting), so prompts are not masked. Zuko still blocks prompt
             rules: vec!["GATEWAY_BYPASS".into()],
             keys: Vec::new(),
             ai_explanation: None,
+            path: None,
         }));
     }
 
@@ -621,6 +624,7 @@ probably a project setting), so prompts are not masked. Zuko still blocks prompt
                 rules: vec!["privacy.blockSecretPrompts".into()],
                 keys: report.keys,
                 ai_explanation: None,
+                path: None,
             }));
             return out;
         }
@@ -653,6 +657,7 @@ probably a project setting), so prompts are not masked. Zuko still blocks prompt
             rules: vec!["privacy.blockSecretPrompts".into()],
             keys: report.keys.clone(),
             ai_explanation: None,
+            path: None,
         }));
         out.receipts.push(Receipt {
             ts: engine::now(),
@@ -779,6 +784,28 @@ pub fn permission_info_for(engine: &Engine, facts: &Facts, payload: &Value) -> O
     Some(zuko_info(&d))
 }
 
+/// The file a file-editing tool call targets, as an absolute path for the "Open file"
+/// button. Only the four editing tools qualify; a relative path is resolved against the
+/// session's working directory. Nothing of the file's content is read or kept.
+fn edited_path(tool: &str, input: &Value, cwd: &str) -> Option<String> {
+    if !matches!(tool, "Write" | "Edit" | "MultiEdit" | "NotebookEdit") {
+        return None;
+    }
+    let raw = ["file_path", "notebook_path"].iter().find_map(|k| input.get(*k).and_then(Value::as_str))?;
+    if raw.is_empty() || raw.len() > 1024 || raw.contains('\u{0}') {
+        return None;
+    }
+    let p = std::path::Path::new(raw);
+    let full = if p.is_absolute() {
+        p.to_path_buf()
+    } else if !cwd.is_empty() && std::path::Path::new(cwd).is_absolute() {
+        std::path::Path::new(cwd).join(p)
+    } else {
+        return None;
+    };
+    Some(full.to_string_lossy().into_owned())
+}
+
 /// The receipt, feed item and stats for a human decision on the island.
 pub fn permission_outcome(engine: &Engine, payload: &Value, info: Option<&Value>, allow: bool, elapsed_ms: Option<u64>) -> Outcome {
     let tool = str_at(payload, "tool_name");
@@ -826,6 +853,7 @@ pub fn permission_outcome(engine: &Engine, payload: &Value, info: Option<&Value>
         rules: rules.clone(),
         keys: keys.clone(),
         ai_explanation: None,
+        path: edited_path(tool, &input, cwd),
     }));
     out.receipts.push(Receipt {
         ts: engine::now(),
@@ -927,6 +955,7 @@ fn browser_event(engine: &Engine, msg: &Value, out: &mut Outcome) {
         rules: Vec::new(),
         keys: keys.clone(),
         ai_explanation: None,
+        path: None,
     }));
     out.receipts.push(Receipt {
         ts: engine::now(),

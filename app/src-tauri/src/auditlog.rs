@@ -335,6 +335,7 @@ fn item_from_receipt(r: &Receipt) -> ActivityItem {
         rules: r.rules.clone(),
         keys: r.keys.clone(),
         ai_explanation: None,
+        path: None,
     }
 }
 

@@ -32,6 +32,11 @@ pub struct ActivityItem {
     /// the fact; display text only, never read by any decision.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ai_explanation: Option<String>,
+    /// Absolute path of the file a Write/Edit/MultiEdit/NotebookEdit call targets, so the
+    /// UI can offer "Open file". A path, never contents; live items only (the audit log
+    /// keeps the masked summary, not this).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

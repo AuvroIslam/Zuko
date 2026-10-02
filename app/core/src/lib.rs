@@ -25,6 +25,7 @@ pub mod audit;
 pub mod detect;
 pub mod guard;
 pub mod hookio;
+pub mod insights;
 pub mod localai;
 pub mod mask;
 pub mod placeholder;
