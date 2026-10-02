@@ -37,8 +37,9 @@ use relay::{error_reply, finish, Transport, TransportError};
 
 /// Budget for getting a pipe connection while the app is busy serving someone else.
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_millis(1000);
-/// How long one request may wait for the app's answer (masking a large document).
-const REPLY_BUDGET: Duration = Duration::from_secs(20);
+/// How long one request may wait for the app's answer (masking a large document, or a waited
+/// local-AI deep scan, itself bounded by the configured timeout).
+const REPLY_BUDGET: Duration = Duration::from_secs(45);
 /// Largest reply line we will buffer from the app.
 const MAX_REPLY_LINE: u64 = 64 * 1024 * 1024;
 
