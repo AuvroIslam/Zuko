@@ -1,0 +1,21 @@
+[package]
+name = "zuko-core"
+description = "Zuko's engine: secret/PII detection, masking vault, agent firewall policy, risk and taint analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "zuko_core"
+crate-type = ["rlib", "cdylib"]
+
+# Pure Rust, no I/O, no clock, no C: the same crate runs in the hook relay (spawned on
+# every Claude Code event, so it must start fast), in the app, and as WASM in the
+# browser extension.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
+aho-corasick = "1"
+sha2 = { version = "0.10", default-features = false }
+base64 = "0.22"
