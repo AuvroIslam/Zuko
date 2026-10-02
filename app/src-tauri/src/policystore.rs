@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use zuko_core::policy::Policy;
 
 pub fn path() -> PathBuf {
-    crate::platform::config_dir().join("policy.json")
+    crate::settings::config_dir().join("policy.json")
 }
 
 /// The saved policy, or the defaults when the file is missing. A file that does
@@ -31,7 +31,7 @@ pub fn load() -> Policy {
 }
 
 pub fn save(policy: &Policy) -> std::io::Result<()> {
-    let dir = crate::platform::config_dir();
+    let dir = crate::settings::config_dir();
     crate::platform::ensure_private_dir(&dir)?;
     let tmp = path().with_extension(format!("json.tmp-{}", std::process::id()));
     std::fs::write(&tmp, policy.to_json_pretty())?;
