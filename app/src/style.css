@@ -1588,6 +1588,17 @@ input[type="range"]::-webkit-slider-thumb {
   max-width: 130px;
 }
 
+.feed-open {
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--dim-2);
+  font-size: 10.5px;
+}
+
+.feed-open:hover {
+  color: var(--ink);
+}
+
 .feed-ago {
   font: 400 10px var(--font);
   color: var(--dim-3);

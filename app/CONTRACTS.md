@@ -66,6 +66,9 @@ New commands (JS argument names are camelCase):
 | `vault_forget` | `key: string` | `boolean` |
 | `vault_clear` | — | `void` |
 | `vault_reveal` | `key: string` | `string \| null` (explicit user click only) |
+| `vault_insights` | `key: string` | `{ label: string, text: string }[] \| null` (local, non-sensitive facts: never the value or more than its last four digits; display only) |
+| `vault_copy` | `key: string` | `boolean` (explicit click only; the Rust side copies the value to the clipboard, so it never reaches the webview, and clears it after 30 s only if the clipboard still holds it; audit receipt event `VaultCopy`, keys only) |
+| `open_file` | `path: string` | `boolean` (existing absolute file only; `code --goto <path>` when VS Code is on PATH, else shows the folder; true when VS Code opened it) |
 | `activity_recent` | `limit: number` | `ActivityItem[]` (newest first) |
 | `audit_verify` | — | `{ ok: boolean, count: number, error: string \| null }` |
 | `audit_open_folder` | — | `void` |
@@ -126,6 +129,7 @@ interface ActivityItem {
   rules: string[];       // policy rule ids + invariant ids
   keys: string[];        // vault keys involved
   aiExplanation?: string; // local AI text, attached when `ai-explain` arrives (display only)
+  path?: string;         // absolute file path of a Write/Edit/MultiEdit/NotebookEdit call ("Open file"); live items only, never file contents
 }
 
 interface SanitizeResult {

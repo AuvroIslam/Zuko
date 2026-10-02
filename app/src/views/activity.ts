@@ -15,7 +15,7 @@ import {
 import type { ViewActions, ViewHost } from "./views";
 import { tierColor } from "../core/layout";
 import { State } from "../core/state";
-import type { ActivityItem } from "../core/bridge";
+import { Bridge, type ActivityItem } from "../core/bridge";
 
 // ── Activity feed ─────────────────────────────────────────────────────────────
 
@@ -30,6 +30,19 @@ const FILTERS: [Filter, string][] = [
 
 /** Rows rendered at most; the rest is one scroll away in the settings window. */
 const MAX_ROWS = 60;
+
+/** "Open file" for a Write/Edit row: VS Code at that file, or its folder. */
+function openFileButton(path: string): HTMLElement {
+  return h("button", {
+    class: "link-btn feed-open",
+    text: "Open file",
+    title: path,
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      void Bridge.openFile(path);
+    },
+  });
+}
 
 function feedRow(item: ActivityItem): HTMLElement {
   const v = verdictMeta(item.verdict);
@@ -48,6 +61,7 @@ function feedRow(item: ActivityItem): HTMLElement {
     h("span", { class: "feed-text", text }),
     tier,
     h("span", { class: "feed-where", text: where }),
+    item.path ? openFileButton(item.path) : null,
     h("span", { class: "feed-ago", text: timeAgo(item.ts) }),
   );
 }

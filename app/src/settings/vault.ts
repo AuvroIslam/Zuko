@@ -1,6 +1,9 @@
 // Vault: every value Zuko has replaced with a placeholder. Real values stay in
 // Rust; this table only shows previews, and Reveal is an explicit click that
-// hides itself again after 10 seconds.
+// hides itself again after 10 seconds. Inspect shows a few non-sensitive facts
+// (brand, country, vendor, expiry...) computed in Rust; Copy value puts the value on
+// the clipboard from Rust, so it never reaches this window, and Rust clears it again
+// after 30 seconds.
 
 import { h, clear } from "../views/dom";
 import { Bridge, VAULT_KINDS, type EntryView } from "../core/bridge";
@@ -8,6 +11,7 @@ import { placeholder, privacySourceLabel } from "../views/format";
 import { confirmButton, feedback, hint, relTime, section, select } from "./ui";
 
 const REVEAL_MS = 10_000;
+const COPY_CLEAR_S = 30;
 
 export function vaultSection(initial: EntryView[] | null): HTMLElement {
   const { el, head } = section("vault", "Vault");
@@ -39,13 +43,53 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
     table.style.display = entries.length ? "" : "none";
     empty.style.display = entries.length ? "none" : "";
     forgetAll.style.display = entries.length ? "" : "none";
-    for (const e of entries) tbody.append(entryRow(e));
+    for (const e of entries) tbody.append(...entryRows(e));
   }
 
-  function entryRow(e: EntryView): HTMLElement {
+  /** The entry's row, plus a hidden row below it for the Inspect panel. */
+  function entryRows(e: EntryView): HTMLElement[] {
     const preview = h("code", { class: "preview", text: e.preview });
     const reveal = h("button", { class: "small", text: "Reveal" });
+    const copy = h("button", { class: "small", text: "Copy value", title: `Copies to the clipboard; cleared after ${COPY_CLEAR_S} s` });
+    const inspect = h("button", { class: "small", text: "Inspect" });
     const forget = h("button", { class: "small danger", text: "Forget" });
+    const facts = h("dl", { class: "facts" });
+    const panel = h("tr", { class: "inspect-row" },
+      h("td", { colspan: "6" }, h("div", { class: "inspect" }, facts)));
+    panel.hidden = true;
+
+    inspect.addEventListener("click", async () => {
+      if (!panel.hidden) {
+        panel.hidden = true;
+        inspect.textContent = "Inspect";
+        return;
+      }
+      try {
+        const rows = await Bridge.vaultInsights(e.key);
+        if (rows == null) {
+          fb.show("warn", `${placeholder(e.key)} is no longer in the vault.`);
+          return;
+        }
+        clear(facts);
+        for (const r of rows) facts.append(h("dt", { text: r.label }), h("dd", { text: r.text }));
+        panel.hidden = false;
+        inspect.textContent = "Close";
+      } catch (err) {
+        fb.error(err, "Couldn't inspect");
+      }
+    });
+
+    copy.addEventListener("click", async () => {
+      try {
+        if (!(await Bridge.vaultCopy(e.key))) {
+          fb.show("warn", `${placeholder(e.key)} is no longer in the vault.`);
+          return;
+        }
+        fb.show("ok", `Copied ${placeholder(e.key)} — clipboard clears in ${COPY_CLEAR_S} s`);
+      } catch (err) {
+        fb.error(err, "Couldn't copy");
+      }
+    });
 
     const hide = () => {
       const t = revealed.get(e.key);
@@ -87,7 +131,7 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
       }
     });
 
-    return h("tr", {},
+    const row = h("tr", {},
       h("td", { class: "what" },
         h("code", { class: "ph", text: placeholder(e.key) }),
         h("div", { class: "hint" }, h("span", { class: "lbl", text: e.label }), e.hint ? ` · ${e.hint}` : "")),
@@ -95,8 +139,9 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
       h("td", { class: "dim nowrap", text: privacySourceLabel(e.source === "manual" ? "Added" : e.source) }),
       h("td", { class: "num", text: String(e.hits) }),
       h("td", { class: "dim nowrap", text: relTime(e.lastUsed * 1000) }),
-      h("td", { class: "actions" }, reveal, forget),
+      h("td", { class: "actions" }, h("div", { class: "btns" }, inspect, reveal, copy, forget)),
     );
+    return [row, panel];
   }
 
   const forgetAll = confirmButton("Forget all", "Click again to forget everything", async () => {
