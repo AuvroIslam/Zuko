@@ -158,7 +158,7 @@ test("pdf text joins words and keeps lines apart", () => {
     { str: "Hello", transform: [1, 0, 0, 1, 10, 100], width: 25, height: 10 },
     { str: "world", transform: [1, 0, 0, 1, 40, 100], width: 25, height: 10 },
     { str: "next", transform: [1, 0, 0, 1, 10, 80], width: 20, height: 10 },
-    { str: "line", transform: [1, 0, 0, 1, 31, 80], width: 18, height: 10, hasEOL: true },
+    { str: "line", transform: [1, 0, 0, 1, 34, 80], width: 18, height: 10, hasEOL: true },
     { str: "last", transform: [1, 0, 0, 1, 10, 60], width: 20, height: 10 },
   ]);
   assert.equal(t, "Hello world\nnext line\nlast");

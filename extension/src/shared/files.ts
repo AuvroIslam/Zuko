@@ -21,9 +21,16 @@ export function isPdf(file: { name: string; type: string }): boolean {
   return file.type === "application/pdf" || PDF_EXT.test(file.name);
 }
 
+/** No extension at all (Dockerfile, Makefile, NOTES) or a bare dotfile (.env): usually plain text. */
+function hasNoRealExtension(name: string): boolean {
+  const base = name.split(/[\\/]/).pop() ?? name;
+  return !/\.[^.]+$/.test(base) || /^\.[^.]+$/.test(base);
+}
+
 /** Text files and code Zuko can scan directly (PDFs are handled separately). */
 export function isScannableText(file: { name: string; type: string }): boolean {
-  return isTextLikeName(file.name) || (isTextLikeType(file.type) && !isPdf(file));
+  if (isPdf(file)) return false;
+  return isTextLikeName(file.name) || isTextLikeType(file.type) || (file.type === "" && hasNoRealExtension(file.name));
 }
 
 /** Largest body or file the net guard reads into memory to scan. */
