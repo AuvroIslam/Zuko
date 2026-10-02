@@ -140,12 +140,14 @@ export interface UploadFrame {
   sy: number;
   tilt: number;
   hop: number;
+  /** Legacy (the old mouth spring): no longer drawn, kept for API stability. */
   mouth: number;
   mouthRect: MouthRect;
   eye: UploadEyeShape;
   lookX: number;
   lookY: number;
   fileVisible: boolean;
+  /** Legacy: 0…1 over the first part of the scan (T_SUCK_START → T_SUCK_END). */
   suck: number;
   zoneOver: boolean;
   zoneAlpha: number;

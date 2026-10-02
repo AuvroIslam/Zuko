@@ -129,7 +129,6 @@ function rasterPoly(polys, size, ox, oy) {
     }
     rows[r] = xs.sort((a, b) => a - b);
   }
-  // Union of polygons: inside when the point is within any span pair of any polygon.
   return (sx, sy) => {
     const xs = rows[sy];
     const x = (sx + 0.5) / SS;
