@@ -12,6 +12,14 @@
 //!
 //! Rehydration only replaces placeholders whose key exists in the vault; unknown
 //! `{{…}}` tokens are left alone. The tolerant `{{ KEY }}` spacing variant is accepted.
+//!
+//! Guarantees (tested): masking is idempotent (`mask(mask(x)) == mask(x)`), existing
+//! placeholders are never altered (a vault value is never replaced *inside* a
+//! placeholder), offsets are always char boundaries (any UTF-8 text), and
+//! `rehydrate(mask_text(t)) == t`. A value found in its JSON-escaped form (`pa\"ss`
+//! inside a JSON text, or `\u00e9` escapes) is masked too, under its own key (same
+//! kind and hint), so the round trip stays exact; [`mask_known`] matches raw values only.
+//! Rehydrate JSON at the value level ([`rehydrate_json`], [`rehydrate_json_text`]).
 
 use crate::detect::Detector;
 use crate::placeholder;
@@ -67,6 +75,69 @@ impl MaskReport {
     }
 }
 
+/// Every well-formed placeholder in `text` as `(byte_start, byte_end, key)` — the same
+/// result as [`placeholder::find_all`], but safe on any UTF-8 text (the bounded search
+/// window is snapped to a char boundary).
+pub fn find_placeholders(text: &str) -> Vec<(usize, usize, String)> {
+    let mut out = Vec::new();
+    if !text.contains(placeholder::OPEN) {
+        return out;
+    }
+    let len = text.len();
+    let mut i = 0;
+    while i < len {
+        let Some(off) = text[i..].find(placeholder::OPEN) else { break };
+        let start = i + off;
+        let inner_start = start + placeholder::OPEN.len();
+        let mut limit = (start + placeholder::MAX_LEN + 2).min(len);
+        while limit > inner_start && !text.is_char_boundary(limit) {
+            limit -= 1;
+        }
+        let mut matched = None;
+        if limit > inner_start {
+            if let Some(rel) = text[inner_start..limit].find(placeholder::CLOSE) {
+                let inner = &text[inner_start..inner_start + rel];
+                let trimmed = inner.trim_matches(' ');
+                if placeholder::parse(trimmed).is_some() {
+                    matched = Some((start, inner_start + rel + placeholder::CLOSE.len(), trimmed.to_string()));
+                }
+            }
+        }
+        match matched {
+            Some(m) => {
+                i = m.1;
+                out.push(m);
+            }
+            None => i = start + 1,
+        }
+    }
+    out
+}
+
+/// True if `[s, e)` overlaps any span in `sorted` (sorted by start, non-overlapping).
+fn overlaps(sorted: &[(usize, usize)], s: usize, e: usize) -> bool {
+    let idx = sorted.partition_point(|&(ps, _)| ps < e);
+    idx > 0 && sorted[idx - 1].1 > s
+}
+
+/// Exact vault matches that do not touch an existing placeholder, with a flag telling
+/// whether the match is an escaped form of the stored value.
+fn value_spans(vault: &Vault, text: &str, protected: &[(usize, usize)]) -> Vec<(usize, usize, String, bool)> {
+    if vault.is_empty() {
+        return Vec::new();
+    }
+    vault
+        .find_value_forms(text)
+        .into_iter()
+        .filter(|(m, _)| !overlaps(protected, m.start, m.end))
+        .map(|(m, escaped)| (m.start, m.end, m.key, escaped))
+        .collect()
+}
+
+fn placeholder_spans(text: &str) -> Vec<(usize, usize)> {
+    find_placeholders(text).into_iter().map(|(s, e, _)| (s, e)).collect()
+}
+
 /// Full masking of `text`: exact vault values first, then detector findings (interned
 /// into the vault). Existing placeholders are kept as they are.
 pub fn mask_text(det: &Detector, vault: &mut Vault, text: &str, ctx: &MaskCtx) -> (String, MaskReport) {
@@ -74,14 +145,26 @@ pub fn mask_text(det: &Detector, vault: &mut Vault, text: &str, ctx: &MaskCtx) -
     if text.is_empty() {
         return (String::new(), report);
     }
-    // (start, end, key, is_new)
-    let mut spans: Vec<(usize, usize, String, bool)> = vault
-        .find_values(text)
-        .into_iter()
-        .map(|m| (m.start, m.end, m.key, false))
-        .collect();
+    let protected = placeholder_spans(text);
+    // (start, end, key, is_new), vault matches first (sorted, non-overlapping). An
+    // escaped occurrence (`pa\"ss` in JSON text) gets its own entry so rehydration
+    // restores exactly the escaped text.
+    let mut spans: Vec<(usize, usize, String, bool)> = Vec::new();
+    for (s, e, key, escaped) in value_spans(vault, text, &protected) {
+        if escaped {
+            let existed = vault.key_for_value(&text[s..e]).is_some();
+            if let Some(k) = vault.intern_escaped_form(&key, &text[s..e], &ctx.source, ctx.now) {
+                spans.push((s, e, k, !existed));
+            }
+        } else {
+            vault.note_masked(&key, ctx.now);
+            spans.push((s, e, key, false));
+        }
+    }
+    let taken: Vec<(usize, usize)> = spans.iter().map(|&(s, e, _, _)| (s, e)).collect();
     for f in det.scan(text) {
-        if spans.iter().any(|&(s, e, _, _)| f.start < e && s < f.end) {
+        // Findings never overlap placeholders (the detector guarantees it) nor each other.
+        if overlaps(&taken, f.start, f.end) {
             continue;
         }
         let existed = vault.key_for_value(&f.value).is_some();
@@ -110,16 +193,23 @@ pub fn mask_text(det: &Detector, vault: &mut Vault, text: &str, ctx: &MaskCtx) -
 
 /// Replaces exact vault values only. Returns the new text and the replacement count.
 pub fn mask_known(vault: &Vault, text: &str) -> (String, usize) {
-    let matches = vault.find_values(text);
+    if vault.is_empty() || text.is_empty() {
+        return (text.to_string(), 0);
+    }
+    let protected = placeholder_spans(text);
+    // Raw values only: rehydration only ever writes raw values, and this must be its
+    // exact inverse.
+    let matches: Vec<(usize, usize, String, bool)> =
+        value_spans(vault, text, &protected).into_iter().filter(|m| !m.3).collect();
     if matches.is_empty() {
         return (text.to_string(), 0);
     }
     let mut out = String::with_capacity(text.len());
     let mut last = 0;
-    for m in &matches {
-        out.push_str(&text[last..m.start]);
-        out.push_str(&placeholder::wrap(&m.key));
-        last = m.end;
+    for (s, e, key, _) in &matches {
+        out.push_str(&text[last..*s]);
+        out.push_str(&placeholder::wrap(key));
+        last = *e;
     }
     out.push_str(&text[last..]);
     (out, matches.len())
@@ -134,7 +224,7 @@ pub fn rehydrate_text(vault: &Vault, text: &str) -> (String, Vec<String>) {
     }
     let mut out = String::with_capacity(text.len());
     let mut last = 0;
-    for (s, e, key) in placeholder::find_all(text) {
+    for (s, e, key) in find_placeholders(text) {
         let Some(entry) = vault.get(&key) else { continue };
         out.push_str(&text[last..s]);
         out.push_str(&entry.value);
@@ -202,10 +292,63 @@ pub fn rehydrate_json(vault: &Vault, v: &mut Value) -> Vec<String> {
     keys
 }
 
+/// Rehydrates the string *values* of a serialized JSON document without re-serializing
+/// the rest: object keys, key order, whitespace and number formatting stay byte-for-byte.
+/// Each changed string is re-encoded with JSON escaping. Returns `None` if `json` does
+/// not parse (callers then pass it through unchanged).
+pub fn rehydrate_json_text(vault: &Vault, json: &str) -> Option<(String, Vec<String>)> {
+    if serde_json::from_str::<serde::de::IgnoredAny>(json).is_err() {
+        return None;
+    }
+    let mut keys = Vec::new();
+    if vault.is_empty() || !json.contains(placeholder::OPEN) {
+        return Some((json.to_string(), keys));
+    }
+    let b = json.as_bytes();
+    let mut out = String::with_capacity(json.len());
+    let mut last = 0;
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'"' {
+            i += 1;
+            continue;
+        }
+        // String token [i, j].
+        let mut j = i + 1;
+        while j < b.len() && b[j] != b'"' {
+            j += if b[j] == b'\\' { 2 } else { 1 };
+        }
+        if j >= b.len() {
+            break;
+        }
+        let token = &json[i..=j];
+        // An object key is followed by ':'.
+        let mut k = j + 1;
+        while k < b.len() && b[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        let is_key = k < b.len() && b[k] == b':';
+        if !is_key && token.contains(placeholder::OPEN) {
+            if let Ok(decoded) = serde_json::from_str::<String>(token) {
+                let (new, ks) = rehydrate_text(vault, &decoded);
+                if !ks.is_empty() {
+                    out.push_str(&json[last..i]);
+                    out.push_str(&serde_json::to_string(&new).unwrap_or_else(|_| token.to_string()));
+                    last = j + 1;
+                    keys.extend(ks);
+                }
+            }
+        }
+        i = j + 1;
+    }
+    out.push_str(&json[last..]);
+    Some((out, keys))
+}
+
 /// Placeholder keys present in `text` that exist in the vault (distinct, in order).
 pub fn keys_in_text(vault: &Vault, text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for (_, _, key) in placeholder::find_all(text) {
+    for (_, _, key) in find_placeholders(text) {
         if vault.get(&key).is_some() && !out.contains(&key) {
             out.push(key);
         }
@@ -226,10 +369,20 @@ pub fn keys_in_json(vault: &Vault, v: &Value) -> Vec<String> {
     out
 }
 
+/// Intro of [`legend`], exactly as shown in its documentation.
+pub const LEGEND_INTRO: &str = "Privacy note from Zuko: some values in this conversation were replaced on the
+user's machine by placeholders like {{API_KEY_1}}. Treat each placeholder as the real
+value: use it verbatim (exact spelling, keep the braces) wherever the value is
+needed, e.g. in code, config files and commands; it is restored locally before
+anything runs. Never ask the user for the real value and never guess it.
+Placeholders in this conversation:";
+
 /// The note given to the model. Empty string if `keys` is empty. Deterministic for a
 /// given vault and key list (keys are sorted), so it does not churn prompt caches.
+/// Keys not in the vault are skipped; descriptions are the entry's hint, else its
+/// label, on one line.
 ///
-/// Shape:
+/// Shape (exact output for a vault holding an OpenAI key and a Visa card):
 /// ```text
 /// Privacy note from Zuko: some values in this conversation were replaced on the
 /// user's machine by placeholders like {{API_KEY_1}}. Treat each placeholder as the real
@@ -241,25 +394,24 @@ pub fn keys_in_json(vault: &Vault, v: &Value) -> Vec<String> {
 /// - {{CARD_1}}: Visa card ending 4242
 /// ```
 pub fn legend(vault: &Vault, keys: &[String]) -> String {
-    let mut keys: Vec<&String> = keys.iter().filter(|k| vault.get(k).is_some()).collect();
+    let mut keys: Vec<(String, u32, &str)> = keys
+        .iter()
+        .filter_map(|k| {
+            let e = vault.get(k)?;
+            let (kind, n) = placeholder::parse(&e.key)?;
+            Some((kind, n, e.key.as_str()))
+        })
+        .collect();
     if keys.is_empty() {
         return String::new();
     }
-    keys.sort_by(|a, b| {
-        let pa = placeholder::parse(a);
-        let pb = placeholder::parse(b);
-        pa.cmp(&pb)
-    });
+    keys.sort();
     keys.dedup();
-    let mut s = String::from(
-        "Privacy note from Zuko: some values in this conversation were replaced on the user's machine by placeholders like {{API_KEY_1}}. \
-Treat each placeholder as the real value: use it verbatim (exact spelling, keep the braces) wherever the value is needed, \
-e.g. in code, config files and commands; it is restored locally before anything runs. \
-Never ask the user for the real value and never guess it.\nPlaceholders in this conversation:",
-    );
-    for k in keys {
+    let mut s = String::from(LEGEND_INTRO);
+    for (_, _, k) in keys {
         let e = vault.get(k).expect("filtered above");
-        let desc = e.hint.clone().unwrap_or_else(|| e.label.clone());
+        let desc = e.hint.clone().filter(|h| !h.trim().is_empty()).unwrap_or_else(|| e.label.clone());
+        let desc: String = desc.split_whitespace().collect::<Vec<_>>().join(" ");
         s.push_str(&format!("\n- {}: {}", placeholder::wrap(k), desc));
     }
     s
@@ -288,5 +440,15 @@ mod tests {
         // Idempotent.
         assert_eq!(mask_text(&det, &mut v, &masked, &ctx).0, masked);
         assert!(legend(&v, &r.keys).contains("- {{API_KEY_1}}: OpenAI API key"));
+    }
+
+    #[test]
+    fn find_placeholders_is_safe_on_multibyte_text() {
+        let t = format!("{{{{a{}", "é".repeat(30));
+        assert!(find_placeholders(&t).is_empty());
+        let t = format!("{}{{{{API_KEY_1}}}}{}", "ঢাকা".repeat(5), "é".repeat(40));
+        let got = find_placeholders(&t);
+        assert_eq!(got.len(), 1);
+        assert_eq!(&t[got[0].0..got[0].1], "{{API_KEY_1}}");
     }
 }
