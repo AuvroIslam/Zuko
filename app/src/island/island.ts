@@ -25,6 +25,8 @@ import { IslandStateMachine } from "./fsm";
 const BOT_OVERHANG = 40;
 /** Same margin as the Rust hit test (src-tauri/src/island.rs). */
 const HIT_MARGIN = 14;
+/** Frame interval while only the flame flickers (~15 fps). */
+const AMBIENT_FRAME_MS = 66;
 
 /** The three views the drop sequence owns; leaving them stops the engine. */
 const UPLOAD_VIEWS: ReadonlySet<IslandViewName> = new Set(["upload", "uploading", "choose"]);
@@ -423,7 +425,7 @@ export class Island {
   }
 
   /**
-   * Zuko eats the file. Nothing here waits on the file system: the copy into
+   * Zuko scans the file. Nothing here waits on the file system: the copy into
    * the inbox runs in the background and swaps the path in when it lands, so a
    * slow disk can never stall the animation — same as FileDropHandler on macOS.
    */
@@ -797,7 +799,16 @@ export class Island {
         !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
         greetingActive || this.engine.busy || UploadSeq.isActive || viewAnimating;
 
-    if (busy) {
+    // When the flame's flicker is the only thing moving, 15 fps is plenty: the
+    // island sits on screen for hours and should not cost a full 60 fps of
+    // repaints just to keep a few pixels of fire alive.
+    const ambientOnly = busy && !settling && !greetingActive && !UploadSeq.isActive &&
+      !viewAnimating && this.botCx.settled && this.botCy.settled && this.botSize.settled &&
+      this.engine.ambientOnly;
+
+    if (ambientOnly) {
+      setTimeout(() => requestAnimationFrame(this.frame), AMBIENT_FRAME_MS);
+    } else if (busy) {
       requestAnimationFrame(this.frame);
     } else {
       this.running = false;

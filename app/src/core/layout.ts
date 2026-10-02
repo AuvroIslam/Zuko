@@ -188,22 +188,23 @@ export function botPosition(
 
 export function botGlowColor(s: BotStateName): string {
   switch (s) {
+    // Matches Zuko's LED eye colours (character/engine.ts).
     case "working":
-      return "#3B9EFF";
+      return "#2EE6C5";
     case "thinking":
-      return "#A78BFA";
+      return "#60A5FA";
     case "searching":
-      return "#6366F1";
+      return "#60A5FA";
     case "approval":
-      return "#F5A524";
+      return "#FFB020";
     case "error":
-      return "#F4505E";
+      return "#FF4D5E";
     case "finished":
-      return "#34D399";
+      return "#4ADE80";
     case "ratelimit":
-      return "#F59E0B";
+      return "#FFB020";
     default:
-      return "#FFFFFF";
+      return "#FF9A3C";
   }
 }
 
