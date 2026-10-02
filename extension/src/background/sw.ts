@@ -100,6 +100,14 @@ async function report(site: SiteId, kind: "masked" | "blocked" | "upload", count
   if (!viaApp) link.event({ kind, site, count, keys });
 }
 
+/** "AI deep scan: +N items" in the tab that sent the text (top frame: only it can show UI). */
+function aiToast(tabId: number | undefined, n: number): void {
+  void publishSync();
+  if (tabId === undefined || n <= 0) return;
+  const text = `AI deep scan: +${n} ${n === 1 ? "item" : "items"}`;
+  void chrome.tabs.sendMessage(tabId, { type: "toast", level: "info", text }, { frameId: 0 }).catch(() => undefined);
+}
+
 let offscreenOpen: Promise<void> | null = null;
 async function ensureOffscreen(): Promise<void> {
   const existing = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
@@ -120,18 +128,23 @@ async function ensureOffscreen(): Promise<void> {
   await offscreenOpen;
 }
 
-async function sanitizePdf(site: SiteId, base64: string): Promise<Record<string, unknown>> {
+async function sanitizePdf(site: SiteId, base64: string, tabId?: number): Promise<Record<string, unknown>> {
   await ensureOffscreen();
   const r = (await chrome.runtime.sendMessage({ target: "offscreen", type: "pdf-extract", base64 })) as PdfExtract | undefined;
   if (!r || !r.ok) return { ok: false, error: r?.error ?? "the PDF reader did not answer" };
   if (!r.hasText) return { ok: true, blocked: true, pages: r.pages, warnings: r.warnings };
-  const masked = await brain.maskMany([r.markdown], { site, mode: "full", source: "file" });
+  link.maybeReconnect();
+  const masked = await brain.maskMany([r.markdown], { site, mode: "full", source: "file", onAiAdded: (n) => aiToast(tabId, n) });
   await report(site, "masked", masked.count, masked.keys, masked.via === "app");
   await publishSync();
   return { ok: true, blocked: false, markdown: masked.texts[0], pages: r.pages, warnings: r.warnings, count: masked.count, keys: masked.keys };
 }
 
 async function status() {
+  // The first connection attempt may still be in flight (a missing host answers a tick
+  // later); report its outcome, not "not linked" for a link that is still being tried.
+  await Promise.race([linking, new Promise((r) => setTimeout(r, 3000))]);
+  await link.refreshLocalAi(5000).catch(() => undefined);
   const stats = brain.getStats();
   const total = { masked: 0, blocked: 0, uploads: 0, restored: 0 };
   for (const s of Object.values(stats)) {
@@ -147,6 +160,7 @@ async function status() {
     engineError: brain.engineError,
     linked: link.linked,
     appVersion: link.appVersion,
+    localAi: link.linked ? link.localAi : null,
     linkError: link.lastError,
     vaultSize: brain.vaultSize(),
     prefs,
@@ -168,8 +182,10 @@ async function handle(msg: SwRequest, sender: chrome.runtime.MessageSender): Pro
       if (!fromPage) break;
       await Promise.race([linking, new Promise((r) => setTimeout(r, 1500))]);
       link.maybeReconnect();
+      void link.refreshLocalAi().catch(() => undefined);
       const site = safeSite(msg.site);
-      const r = await brain.maskMany(msg.texts, { site, mode: msg.mode, source: msg.source });
+      const tabId = sender.tab?.id;
+      const r = await brain.maskMany(msg.texts, { site, mode: msg.mode, source: msg.source, onAiAdded: (n) => aiToast(tabId, n) });
       if (msg.mode === "full") {
         await report(site, "masked", r.count, r.keys, r.via === "app");
         if (r.newKeys.length > 0) await publishSync();
@@ -211,7 +227,7 @@ async function handle(msg: SwRequest, sender: chrome.runtime.MessageSender): Pro
     }
     case "sanitize-pdf":
       if (!fromPage) break;
-      return sanitizePdf(safeSite(msg.site), msg.base64);
+      return sanitizePdf(safeSite(msg.site), msg.base64, sender.tab?.id);
     case "state": {
       const site = safeSite(msg.site);
       return { ok: true, enabled: prefs.sites[site] !== false, engine: brain.engineLoaded, linked: link.linked, vaultSize: brain.vaultSize() };

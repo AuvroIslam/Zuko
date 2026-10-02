@@ -196,6 +196,57 @@ test("an app that answers 'not running' to hello is a clean 'not linked' and rel
   assert.equal(disconnected, true, "no idle native port keeping the worker alive");
 });
 
+test("the app's local AI: status in the popup, waited upload scan re-masks, toast, graceful 'disabled'", async () => {
+  const name = { category: "pii", created: 1, hint: null, hits: 0, key: "NAME_1", kind: "NAME", label: "Person name", lastUsed: 1, source: "local-ai", value: "Rahim Uddin" };
+  let localAi = { enabled: true, reachable: true, model: "gemma3:4b", waitForPromptScan: false };
+  const scans = [];
+  setNative(() =>
+    appPort(async (m) => {
+      switch (m.op) {
+        case "hello":
+          return { ok: true, app: "zuko", version: "1.2.3" };
+        case "policy":
+          return { ok: true, detector: {}, localAi };
+        case "vault":
+          return { ok: true, vault: { entries: [], counters: {} } };
+        case "deepScan":
+          scans.push(m);
+          if (!localAi.enabled) return { ok: true, enabled: false, added: [] };
+          return { ok: true, enabled: true, added: [{ key: "NAME_1", label: "Person name" }], vault: { entries: [name], counters: { NAME: 1 } } };
+      }
+      return { ok: false, error: "unknown op" };
+    }),
+  );
+  assert.equal((await send({ type: "relink" }, popup)).linked, true);
+  let s = await send({ type: "status" }, popup);
+  assert.deepEqual(s.localAi, localAi);
+
+  toasts.length = 0;
+  const r = await send({ type: "maskMany", site: "chatgpt", texts: [`Rahim Uddin wrote ${AWS}`], mode: "full", source: "file" }, page);
+  assert.match(r.texts[0], /^\{\{NAME_1\}\} wrote \{\{[A-Z_]+_\d+\}\}$/);
+  assert.equal(r.aiAdded, 1);
+  assert.equal(scans.length, 1);
+  assert.equal(scans[0].wait, true);
+  assert.ok(!scans[0].text.includes(AWS), "the app only gets masked text");
+  assert.deepEqual(toasts.at(-1), { tabId: 7, msg: { type: "toast", level: "info", text: "AI deep scan: +1 item" }, opts: { frameId: 0 } });
+  assert.equal((await send({ type: "resolve", keys: ["NAME_1"] }, page)).values.NAME_1.value, "Rahim Uddin");
+
+  // Prompts: not held back by default.
+  const p = await send({ type: "maskMany", site: "chatgpt", texts: ["call Tahmina Akter"], mode: "full" }, page);
+  assert.equal(p.texts[0], "call Tahmina Akter");
+  await tick(20);
+  assert.equal(scans.at(-1).wait, false);
+
+  // The app turns the local AI off: its first answer flips the extension to "off", no more asks.
+  localAi = { ...localAi, enabled: false };
+  await send({ type: "maskMany", site: "chatgpt", texts: ["Someone Else wrote this"], mode: "full", source: "file" }, page);
+  const before = scans.length;
+  await send({ type: "maskMany", site: "chatgpt", texts: ["Someone Else wrote this"], mode: "full", source: "file" }, page);
+  assert.equal(scans.length, before);
+  s = await send({ type: "status" }, popup);
+  assert.equal(s.localAi.enabled, false);
+});
+
 test("clearing the session vault forgets every value", async () => {
   assert.equal((await send({ type: "clearVault" }, popup)).ok, true);
   assert.deepEqual((await send({ type: "known" }, page)).keys, []);

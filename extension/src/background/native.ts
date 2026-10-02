@@ -5,7 +5,7 @@
 // The host answers strictly one reply per request and echoes our `id`, so a reply that
 // arrives after a timeout can never be mistaken for the answer to a later request.
 
-import type { AppLink } from "./brain.ts";
+import type { AppLink, DeepScanReply, LocalAiStatus } from "./brain.ts";
 import type { MaskReport, VaultJson } from "../shared/engine.ts";
 
 export const HOST_NAME = "app.zuko.host";
@@ -25,6 +25,9 @@ export class NativeLink implements AppLink {
   private lastAttempt = 0;
 
   linked = false;
+  /** The app's local-AI status as of the last policy read (null: unknown / older app). */
+  localAi: LocalAiStatus | null = null;
+  private policyAt = 0;
   appVersion: string | null = null;
   lastError: string | null = null;
   /** Called after every successful link (the service worker syncs policy and vault here). */
@@ -114,6 +117,7 @@ export class NativeLink implements AppLink {
     this.port = null;
     const wasLinked = this.linked;
     this.linked = false;
+    this.localAi = null;
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
       p.resolve(null);
@@ -171,8 +175,52 @@ export class NativeLink implements AppLink {
   }
 
   async fetchPolicy(): Promise<Record<string, unknown> | null> {
-    const r = await this.request({ op: "policy" }, 5000);
+    const r = await this.request({ op: "policy" }, 6000);
+    this.policyAt = Date.now();
+    if (r) {
+      const a = r.localAi;
+      this.localAi =
+        a && typeof a === "object"
+          ? {
+              enabled: a.enabled === true,
+              reachable: a.reachable === true,
+              model: typeof a.model === "string" ? a.model : "",
+              waitForPromptScan: a.waitForPromptScan === true,
+            }
+          : null; // an older app: no local AI
+    }
     return r && r.detector && typeof r.detector === "object" ? (r.detector as Record<string, unknown>) : null;
+  }
+
+  /** Re-reads the app's local-AI status when the last read is older than `maxAgeMs`. */
+  async refreshLocalAi(maxAgeMs = 30_000): Promise<void> {
+    if (!this.linked || Date.now() - this.policyAt < maxAgeMs) return;
+    this.policyAt = Date.now(); // one refresh at a time
+    await this.fetchPolicy();
+  }
+
+  async deepScan(text: string, site: string, wait: boolean): Promise<DeepScanReply | null> {
+    // The app bounds a waited scan by its own timeout; the host gives up after 45 s.
+    const r = await this.request({ op: "deepScan", text, site, wait }, wait ? 44_000 : 6000);
+    if (!r) return null;
+    if (r.enabled !== true) {
+      if (this.localAi) this.localAi = { ...this.localAi, enabled: false };
+      return { enabled: false, added: [], vault: null };
+    }
+    let v = r.vault;
+    if (typeof v === "string") {
+      try {
+        v = JSON.parse(v);
+      } catch {
+        v = null;
+      }
+    }
+    const vault: VaultJson | null =
+      v && typeof v === "object" ? { entries: Array.isArray(v.entries) ? v.entries : [], counters: v.counters ?? {} } : null;
+    const added = Array.isArray(r.added)
+      ? r.added.filter((a: any) => a && typeof a.key === "string").map((a: any) => ({ key: a.key as string, label: String(a.label ?? "") }))
+      : [];
+    return { enabled: true, added, vault };
   }
 
   event(e: { kind: "masked" | "blocked" | "upload"; site: string; count: number; keys: string[] }): void {

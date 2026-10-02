@@ -236,7 +236,16 @@ Extension → app messages (`{"op": …}`):
 - `{"op":"rehydrate","text":…}` → `{"ok":true,"text":…,"keys":[…]}`
 - `{"op":"vault"}` → `{"ok":true,"vault":<Vault JSON>}` (the full vault, so the extension's
   WASM engine can work offline; kept in `chrome.storage.session`)
-- `{"op":"policy"}` → `{"ok":true,"detector":DetectorConfig}`
+- `{"op":"policy"}` → `{"ok":true,"detector":DetectorConfig,"localAi":{"enabled","reachable","model","waitForPromptScan"}}`
+  (`reachable` is a live Ollama probe, only made when enabled)
+- `{"op":"deepScan","text":…,"site":…,"wait":bool}` — the local-AI second look at text the extension
+  already masked. Local AI off → `{"ok":true,"enabled":false,"added":[]}` at once. `wait:true` →
+  scan now (bounded by `localAi.timeoutMs`; long text is chunked) and reply
+  `{"ok":true,"enabled":true,"added":[{"key","label"}],"vault":<Vault JSON>}` with the entries it
+  learned; `wait:false` → queue the scan, reply at once with `added:[]`, `queued:true` and the vault
+  as known now. ADD-ONLY: the app only interns entries and the extension merges only adds, so the
+  AI can make Zuko stricter, never looser. The model sees text after deterministic masking only;
+  loopback-only, cached and concurrency-limited like every other local-AI call.
 - `{"op":"event","kind":"masked"|"blocked"|"upload","site":…,"count":…,"keys":[…]}` → `{"ok":true}`
   (shown in the app's activity feed and privacy toasts)
 

@@ -78,6 +78,25 @@ If the app is closed or the host is not registered, Zuko works alone with its ow
 Values masked while the app was closed stay in the extension's session vault; when the app comes back its
 numbering wins, and a clashing local key is renumbered.
 
+## AI deep scan through the app (optional, off by default)
+
+Names and street addresses have no fixed pattern, so the regex engine misses them. If you turn on the
+local AI in the desktop app (Ollama on this machine, see Settings, Local AI), the extension asks the
+app for a second look. The extension never talks to Ollama itself, only to the app over the same
+native-messaging link.
+
+* The scan only ever sees text the WASM engine has **already masked**, and it can only **add** vault
+  entries (names, addresses). It never removes a mask or allows anything. If the app, the link or
+  Ollama is unavailable, nothing changes: you get the normal deterministic masking.
+* **Uploads** (text files and PDFs) always wait for the scan (bounded by the app's timeout), then are
+  re-masked with what it learned. **Prompts** are scanned in the background by default, so the **first
+  message that mentions a new name or address goes out with that name unmasked** (deterministic masking
+  still applies). The scan then teaches the session vault, and every later message masks it. Turn on
+  "wait for AI scan on prompts" in the app to hold each prompt until the scan is back (it adds the
+  model's latency to every send).
+* When the scan adds something you see a toast, "AI deep scan: +N items". The popup shows
+  "Local AI: on (model) / off / unreachable".
+
 ## Architecture
 
 ```
