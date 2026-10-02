@@ -1,0 +1,139 @@
+# Precision fixtures: no line may produce a finding (default config, and again with ips on).
+# A newline inside a case is written as ␤.
+# --- hashes, ids, encodings
+commit 3f7¦86850e387550fdab836ed7e6dc881de23001b
+git checkout 9fc¦eb02d0ae598e95dc970b74767f19372d61af8 && git log -1
+Merge: a1b2c3d e4f5a6b
+id: 123¦e4567-e89b-12d3-a456-426614174000
+const uuid = "550¦e8400-e29b-41d4-a716-446655440000";
+request_id=6ba¦7b810-9dad-11d1-80b4-00c04fd430c8
+"integrity": "sha¦512-z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpI¦dNs6c5H0NE8XYXysP+DGN¦KHfuwvY7kxvUdBeoGlODJ6+SfaPg==",
+<script src="https://cdn.jsdelivr.net/npm/vue@3" integrity="sha¦384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/uxy¦9rx7HNQlGYl1kPzQho1wx4JwY8wC" crossorigin="anonymous"></script>
+"resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+<img src="data:image/png;base64,iVB¦ORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==">
+background: url(data:image/svg+xml;base64,PHN¦2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCAxMCI+PC9zdmc+);
+docker pull nginx@sha256:e3b¦0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+"etag": "W/\"5e15153d-120f\""
+color: #ff00ff; border: 1px solid #00ff0080;
+ssh-rsa AAA¦AB3NzaC1yc2EAAAADAQABAAABAQC7fakeFAKEfakePublicKeyMaterialOnlyNotSecret0123456789 zuko@laptop
+-----BEGIN PUBLIC KEY-----␤MII¦BIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu1SU1LfVLPHCozMxH2Mo␤-----END PUBLIC KEY-----
+-----BEGIN CER¦TIFICATE-----␤MIIDdzCCAl+gAw¦IBAgIEAgAAuTANBgkqhkiG9w0BAQUFADBaMQswCQYDVQQGEwJJ␤-----END CER¦TIFICATE-----
+# --- versions, numbers, timestamps
+"version": "1.2.3", "react": "^18.2.0", "node": ">=20.11.1"
+Released v10.4.12 on 2024-01-15
+1.0.0+20130313144700 and 2.0.0-rc.1+build.5
+2024-01-15T10:30:00+05:30
+created_at: 1700000000000
+2026-10-02 12:00:00 UTC
+price: $1,234,567.89, pi = 3.14159265358979
+ISBN 978¦-0-306-40615-7
+build 20171234567890 finished in 17.2s
+order id 123¦4567890123456 shipped
+tracking 400¦0000000000000
+0000 0000 0000 0000
+GB82 WEST 1234 5698 7654 33 is a bad checksum
+DE00 0000 0000 0000 0000 00
+x = a +12345 and 1+2345678901
+port 5432, timeout 30000, retries 3
+Windows 10.0.26200.1234
+# --- references and templates
+const key = process.env.OPENAI_API_KEY;
+apiKey: process.env.OPENAI_API_KEY,
+api_key = os.getenv("OPENAI_API_KEY")
+API_KEY = os.environ["API_KEY"]
+password = os.environ.get("DB_PASSWORD")
+token = os.environ["GITHUB_TOKEN"]
+const secret = import.meta.env.VITE_SECRET;
+let token = std::env::var("GITHUB_TOKEN")?;
+api_key = {{API_KEY_1}}
+Use {{ API_KEY_1 }} and {{PASSWORD_2}} in .env
+OPENAI_API_KEY=you¦r_api_key_here
+api_key: <YOUR_API_KEY>
+export OPENAI_API_KEY=sk-...
+OPENAI_API_KEY=sk-¦xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+password=${DB_PASS}
+password: ${{ secrets.DB_PASSWORD }}
+token: ${{ secrets.GITHUB_TOKEN }}
+set API_KEY=%API_KEY%
+Authorization: Bearer ${TOKEN}
+-H "Authorization: Bearer $GITHUB_TOKEN"
+-H "Authorization: Bearer <token>"
+Authorization: Bearer YOUR_TOKEN_HERE
+AKI¦AIOSFODNN7EXAMPLE
+aws¦_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPx¦RfiCYEXAMPLEKEY
+postgres://user:password@localhost:5432/db
+postgresql://localhost/mydb
+DATABASE_URL=postgres://app:${DB_PASSWORD}@db:5432/app
+https://user:pass@example.com/path
+pas¦sword_confirmation: "{{ form.password }}"
+"password": "********"
+password: changeme
+SECRET_KEY=replace-me
+# --- emails that are not personal
+contact someone@example.com or admin@example.org
+git@github.com:anthropics/claude-code.git
+Co-Authored-By: Claude <noreply@anthropic.com>
+12345+octocat@users.noreply.github.com
+<img src="logo@2x.png"> and icon@3x.webp
+npm install @types/node@18.11.9 lodash@4.17.21
+"@anthropic-ai/claude-code@1.0.0"
+user@localhost
+mailto:info@example.net
+test@foo.test and a@b.invalid
+# --- private and special IPs (also run with ips on)
+listening on 127.0.0.1:8080
+router 192.168.1.10, gateway 10.0.0.1, vpn 172.16.0.5
+bind 0.0.0.0 and broadcast 255.255.255.255
+http://localhost:3000/api
+loopback ::1 and link-local fe80::1
+docs use 203.0.113.5 and 2001:db8::1
+Version 1.2.3.4 and v2.3.4.5
+time 12:30:45 mac 00:1A:2B:3C:4D:5E
+OID 1.3.6.1.4.1.311
+# --- code identifiers and prose
+function get¦UserAccountSettingsHandler() { return max¦_retry_count_for_upload; }
+max¦_retry_count_for_upload = 3
+const apiKey = getApiKey();
+password: string;
+password?: string;
+token_type: "bearer"
+max_tokens: 4096
+"max_tokens": 8192, "temperature": 0.7
+password = None
+self.password = password
+password = request.form['password']
+if (!password) return;
+def check_password(password: str) -> bool:
+const token = await getToken();
+secret = generate_secret()
+api_key_id: 12345
+PAS¦SWORD_MIN_LENGTH = 8
+<input type="password" name="password" placeholder="Password">
+const SECRET_ROUTE = "/admin/secret-settings";
+secret: ./secrets/prod.key
+pri¦vate_key_path = "~/.ssh/id_ed25519"
+secretName: my-tls-cert
+kind: Secret
+"apiKeyRequired": true
+TOKEN_LIMIT=100000
+password reset link expired
+Enter your password:
+The token: everything is fine
+Token: required
+Bring your passport to the office
+Call the team tomorrow about the release
+token_count = len(tokens)
+api_key = get¦_api_key_from_vault(name)
+password_hash = bcrypt.hashpw(password, salt)
+const passwordField = document.getElementById("password");
+userPassword = form.password.value
+acc¦ess_token_expires_in: 3600
+auth_header = f"Bearer {token}"
+Authorization: Bearer token
+bearer authentication scheme
+SK_LIVE = False
+const sk = "sk-";
+key: value
+secret_key_base: <%= ENV["SECRET_KEY_BASE"] %>
+আমার নাম রহিম, আমি ঢাকায় থাকি।
+এই কোডটা ঠিক করে দাও: let x = 5;

@@ -167,6 +167,8 @@ enum V {
     Assign,
     /// Context-free high-entropy token.
     HighEntropy,
+    /// Azure AD client secret: delimiter guards checked in code, entropy floor.
+    AzureAd,
 }
 
 struct Spec {
@@ -194,9 +196,9 @@ use kinds::*;
 /// Secret rules. Regexes derived in part from gitleaks (MIT); see THIRD_PARTY.md.
 const SECRET_SPECS: &[Spec] = &[
     Spec { id: "private-key", label: "Private key", kind: PRIVATE_KEY, prio: 0, conf: 0.99, kw: &["-----begin"], v: V::None,
-        pat: r"(?i)(-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----[\s\S]{32,}?-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----)" },
+        pat: r"(-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----(?:[A-Za-z0-9+/=\s]|\\[nr]|[A-Za-z][A-Za-z-]{1,30}:[^\n\\]*){32,}?-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----)" },
     Spec { id: "private-key-truncated", label: "Private key", kind: PRIVATE_KEY, prio: 0, conf: 0.9, kw: &["-----begin"], v: V::PemTruncated,
-        pat: r"(?i)(-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----(?:[A-Za-z0-9+/=\s]|\\[nr]){64,})" },
+        pat: r"(-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----(?:[A-Za-z0-9+/=\s]|\\[nr]){64,})" },
     Spec { id: "anthropic-api-key", label: "Anthropic API key", kind: API_KEY, prio: P_PREFIXED, conf: 0.99, kw: &["sk-ant-"], v: V::None,
         pat: r"\b(sk-ant-[a-z]{2,6}[0-9]{2}-[A-Za-z0-9_-]{32,400})(?:[^A-Za-z0-9_-]|$)" },
     Spec { id: "openai-api-key", label: "OpenAI API key", kind: API_KEY, prio: P_PREFIXED, conf: 0.98, kw: &["sk-proj-", "sk-svcacct-", "sk-admin-", "sk-none-", "t3blbkfj"], v: V::None,
@@ -275,8 +277,8 @@ const SECRET_SPECS: &[Spec] = &[
         pat: r"\b(EAA[MC][A-Za-z0-9]{100,400})\b" },
     Spec { id: "azure-storage-key", label: "Azure storage account key", kind: SECRET, prio: P_PREFIXED, conf: 0.97, kw: &["accountkey="], v: V::None,
         pat: r"(?i)\bAccountKey=([A-Za-z0-9+/]{86}==)" },
-    Spec { id: "azure-ad-client-secret", label: "Azure AD client secret", kind: SECRET, prio: P_PREFIXED, conf: 0.9, kw: &["q~"], v: V::Entropy(3.0),
-        pat: r#"(?:^|[\\'"\x60\s>=:(,)])([a-zA-Z0-9_~.]{3}[0-9]Q~[a-zA-Z0-9_~.-]{31,34})(?:$|[\\'"\x60\s<),])"# },
+    Spec { id: "azure-ad-client-secret", label: "Azure AD client secret", kind: SECRET, prio: P_PREFIXED, conf: 0.9, kw: &["q~"], v: V::AzureAd,
+        pat: r"([a-zA-Z0-9_~.]{3}[0-9]Q~[a-zA-Z0-9_~.-]{31,34})" },
     Spec { id: "jwt", label: "JSON Web Token", kind: JWT, prio: P_PREFIXED, conf: 0.95, kw: &["eyj"], v: V::Jwt,
         pat: r"\b(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.(?:[A-Za-z0-9_-]{10,}={0,2})?)" },
     Spec { id: "connection-string", label: "Connection string with password", kind: CONN_STRING, prio: P_STRUCTURED, conf: 0.95, kw: &["://"], v: V::ConnString,
@@ -308,6 +310,54 @@ const ENTROPY_SPEC: Spec = Spec {
 struct SecretRule {
     spec: &'static Spec,
     re: BRegex,
+    /// Run only in windows around keyword hits: bytes after the keyword (0 = whole text).
+    win: usize,
+}
+
+/// Keyword-anchored rules whose match lies within a bounded distance of a keyword hit;
+/// they run on windows around the hits instead of the whole text (gitleaks fragments).
+fn window_of(id: &str) -> usize {
+    match id {
+        "aws-secret-key" => 128,
+        "url-password" => 640,
+        "connection-string" => 1024,
+        "authorization-header" | "api-key-header" => 96,
+        "curl-user-password" => 560,
+        "mysql-password-flag" => 400,
+        "bearer-token" => 48,
+        "cli-secret-flag" => 300,
+        "generic-secret" => 320,
+        "telegram-bot-token" => 64,
+        "mailchimp-api-key" => 16,
+        "twilio-api-key" => 48,
+        _ => 0,
+    }
+}
+
+/// Bytes before a keyword hit that a windowed match may start at (key prefixes, schemes).
+const WIN_BACK: usize = 64;
+
+/// Merged `[start, end)` windows around `hits`, widened so slicing never cuts a token:
+/// starts move back over word-ish bytes, ends move forward to whitespace or a quote.
+fn windows(b: &[u8], hits: &[(usize, usize)], fwd: usize) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for &(hs, he) in hits {
+        let mut ws = hs.saturating_sub(WIN_BACK);
+        let floor = ws.saturating_sub(256);
+        while ws > floor && (b[ws - 1].is_ascii_alphanumeric() || matches!(b[ws - 1], b'_' | b'.' | b'-' | b'+' | b':')) {
+            ws -= 1;
+        }
+        let mut we = (he + fwd).min(b.len());
+        let cap = (we + 4096).min(b.len());
+        while we < cap && !b[we].is_ascii_whitespace() && !matches!(b[we], b'"' | b'\'' | b'`' | b'<' | b'>') {
+            we += 1;
+        }
+        match out.last_mut() {
+            Some(last) if ws <= last.1 => last.1 = last.1.max(we),
+            _ => out.push((ws, we)),
+        }
+    }
+    out
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -334,11 +384,30 @@ struct PiiRule {
     ctx: &'static [&'static str],
 }
 
+/// How far (chars) before a value its context word may be.
+const CTX_WINDOW_CHARS: usize = 40;
+/// Bytes after a context word scanned for values: 40 chars of up to 4 bytes, plus the
+/// longest value.
+const CTX_WINDOW_BYTES: usize = CTX_WINDOW_CHARS * 4 + 64;
+
 const CTX_SSN: &[&str] = &["ssn", "social security", "social-security", "ss#", "soc sec", "soc. sec"];
-const CTX_NID: &[&str] = &["nid", "national id", "national-id", "nationalid", "national identity", "voter id", "id card", "id no", "id number", "aadhaar", "cnic", "জাতীয় পরিচয়", "এনআইডি", "এন আই ডি"];
-const CTX_PASSPORT: &[&str] = &["passport", "পাসপোর্ট"];
-const CTX_DOB: &[&str] = &["dob", "d.o.b", "date of birth", "date-of-birth", "birth date", "birthdate", "birthday", "born", "জন্ম"];
-const CTX_PHONE: &[&str] = &["phone", "mobile", "tel", "cell", "whatsapp", "call", "contact", "fax", "ফোন", "মোবাইল"];
+const CTX_NID: &[&str] = &[
+    "nid", "national id", "national-id", "nationalid", "national identity", "voter id", "id card", "id no", "id number",
+    "aadhaar", "cnic",
+    "\u{99C}\u{9BE}\u{9A4}\u{9C0}\u{9DF} \u{9AA}\u{9B0}\u{9BF}\u{99A}\u{9DF}", // jatiyo porichoy
+    "\u{98F}\u{9A8}\u{986}\u{987}\u{9A1}\u{9BF}",                              // NID in Bangla letters
+    "\u{98F}\u{9A8} \u{986}\u{987} \u{9A1}\u{9BF}",
+];
+const CTX_PASSPORT: &[&str] = &["passport", "\u{9AA}\u{9BE}\u{9B8}\u{9AA}\u{9CB}\u{9B0}\u{9CD}\u{99F}"];
+const CTX_DOB: &[&str] = &[
+    "dob", "d.o.b", "date of birth", "date-of-birth", "birth date", "birthdate", "birthday", "born",
+    "\u{99C}\u{9A8}\u{9CD}\u{9AE}", // jonmo
+];
+const CTX_PHONE: &[&str] = &[
+    "phone", "mobile", "tel", "cell", "whatsapp", "call", "contact", "fax",
+    "\u{9AB}\u{9CB}\u{9A8}",                         // phone
+    "\u{9AE}\u{9CB}\u{9AC}\u{9BE}\u{987}\u{9B2}", // mobile
+];
 
 struct Compiled {
     secrets: Vec<SecretRule>,
@@ -361,6 +430,8 @@ struct Compiled {
 pub struct Detector {
     cfg: DetectorConfig,
     inner: Compiled,
+    /// `cfg.allowlist`, trimmed and lowercased.
+    allow: Vec<String>,
 }
 
 fn bre(pattern: &str) -> BRegex {
@@ -382,10 +453,10 @@ impl Detector {
         let mut secrets = Vec::new();
         if cfg.secrets {
             for spec in SECRET_SPECS {
-                secrets.push(SecretRule { spec, re: bre(spec.pat) });
+                secrets.push(SecretRule { spec, re: bre(spec.pat), win: window_of(spec.id) });
             }
             if cfg.generic_entropy {
-                secrets.push(SecretRule { spec: &ENTROPY_SPEC, re: bre(ENTROPY_SPEC.pat) });
+                secrets.push(SecretRule { spec: &ENTROPY_SPEC, re: bre(ENTROPY_SPEC.pat), win: 0 });
             }
         }
         let mut always = Vec::new();
@@ -429,13 +500,13 @@ impl Detector {
                 add(Pii::PhoneNational, r"\(?[0-9]{3}\)?[ .-]?[0-9]{3}[ .-]?[0-9]{4}", CTX_PHONE);
             }
             if cfg.cards {
-                add(Pii::Card, r"[0-9](?:[ -]?[0-9]){12,18}", &[]);
+                add(Pii::Card, r"[0-9][0-9 -]{11,35}[0-9]", &[]);
             }
             if cfg.ibans {
-                add(Pii::Iban, r"[A-Z]{2}[0-9]{2}(?: ?[A-Z0-9]{4}){2,8}(?: ?[A-Z0-9]{1,4})?", &[]);
+                add(Pii::Iban, r"[A-Z]{2}[0-9]{2}[ A-Z0-9]{11,42}", &[]);
             }
             if cfg.ips {
-                add(Pii::Ipv4, r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}", &[]);
+                add(Pii::Ipv4, r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", &[]);
                 add(Pii::Ipv6, r"[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}", &[]);
             }
             if cfg.national_ids {
@@ -445,15 +516,21 @@ impl Detector {
                 add(Pii::Dob, r"[0-9]{1,4}[./-][0-9]{1,2}[./-][0-9]{1,4}", CTX_DOB);
             }
         }
-        let mut ctx_patterns: Vec<&str> = Vec::new();
+        let mut ctx_patterns: Vec<String> = Vec::new();
         let mut ctx_rules: Vec<Vec<usize>> = Vec::new();
         for (i, r) in pii.iter().enumerate() {
             for w in r.ctx {
-                match ctx_patterns.iter().position(|p| p == w) {
-                    Some(p) => ctx_rules[p].push(i),
-                    None => {
-                        ctx_patterns.push(w);
-                        ctx_rules.push(vec![i]);
+                let variants = [w.to_string(), decompose_bengali(w)];
+                for (n, v) in variants.into_iter().enumerate() {
+                    if n == 1 && v == *w {
+                        continue;
+                    }
+                    match ctx_patterns.iter().position(|p| *p == v) {
+                        Some(p) => ctx_rules[p].push(i),
+                        None => {
+                            ctx_patterns.push(v);
+                            ctx_rules.push(vec![i]);
+                        }
                     }
                 }
             }
@@ -485,8 +562,15 @@ impl Detector {
         };
         let placeholder = Regex::new(r"\{\{ ?[A-Z][A-Z0-9_]*_[1-9][0-9]* ?\}\}").unwrap();
         let protect = bre(r"data:[A-Za-z]+/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+|\bsha(?:1|256|384|512)-[A-Za-z0-9+/]{20,}={0,2}");
+        let allow = cfg
+            .allowlist
+            .iter()
+            .map(|a| a.trim().to_ascii_lowercase())
+            .filter(|a| !a.is_empty())
+            .collect();
         Self {
             cfg: cfg.clone(),
+            allow,
             inner: Compiled { secrets, always, kw_ac, kw_rules, pii, ctx_ac, ctx_rules, terms, placeholder, protect },
         }
     }
@@ -542,46 +626,64 @@ impl Detector {
             active[i] = true;
             remaining -= 1;
         }
+        let b = text.as_bytes();
+        let any_windowed = rules.iter().any(|r| r.win > 0);
+        let mut hits: Vec<Vec<(usize, usize)>> = vec![Vec::new(); rules.len()];
         if let Some(ac) = &self.inner.kw_ac {
-            for m in ac.find_overlapping_iter(text.as_bytes()) {
+            for m in ac.find_overlapping_iter(b) {
                 for &i in &self.inner.kw_rules[m.pattern().as_usize()] {
                     if !active[i] {
                         active[i] = true;
                         remaining -= 1;
                     }
+                    if rules[i].win > 0 {
+                        hits[i].push((m.start(), m.end()));
+                    }
                 }
-                if remaining == 0 {
+                if remaining == 0 && !any_windowed {
                     break;
                 }
             }
         }
-        let b = text.as_bytes();
         for (i, r) in rules.iter().enumerate() {
             if !active[i] {
                 continue;
             }
-            let group = if r.spec.v == V::Assign { 2 } else { 1 };
-            for caps in r.re.captures_iter(b) {
-                let Some(m) = caps.get(group) else { continue };
-                let (s, mut e) = (m.start(), m.end());
-                if !text.is_char_boundary(s) {
-                    continue;
-                }
-                while e > s && !text.is_char_boundary(e) {
-                    e -= 1;
-                }
-                if e <= s {
-                    continue;
-                }
-                let key = if group == 2 {
-                    caps.get(1).and_then(|k| std::str::from_utf8(k.as_bytes()).ok())
-                } else {
-                    None
-                };
-                let whole = caps.get(0).map(|m| m.as_bytes()).unwrap_or(&[]);
-                if let Some(c) = self.check_secret(text, r.spec, s, e, key, whole) {
-                    out.push(c);
-                }
+            let ranges = if r.win > 0 && !hits[i].is_empty() {
+                hits[i].sort_unstable();
+                windows(b, &hits[i], r.win)
+            } else {
+                vec![(0, b.len())]
+            };
+            for (ws, we) in ranges {
+                self.run_secret_rule(text, r, ws, we, out);
+            }
+        }
+    }
+
+    fn run_secret_rule(&self, text: &str, r: &SecretRule, ws: usize, we: usize, out: &mut Vec<Cand>) {
+        let b = text.as_bytes();
+        let group = if r.spec.v == V::Assign { 2 } else { 1 };
+        for caps in r.re.captures_iter(&b[ws..we]) {
+            let Some(m) = caps.get(group) else { continue };
+            let (s, mut e) = (ws + m.start(), ws + m.end());
+            if !text.is_char_boundary(s) {
+                continue;
+            }
+            while e > s && !text.is_char_boundary(e) {
+                e -= 1;
+            }
+            if e <= s {
+                continue;
+            }
+            let key = if group == 2 {
+                caps.get(1).and_then(|k| std::str::from_utf8(k.as_bytes()).ok())
+            } else {
+                None
+            };
+            let whole = caps.get(0).map(|m| m.as_bytes()).unwrap_or(&[]);
+            if let Some(c) = self.check_secret(text, r.spec, s, e, key, whole) {
+                out.push(c);
             }
         }
     }
@@ -606,6 +708,16 @@ impl Detector {
             }
             V::Entropy(min) => {
                 if shannon_entropy(&text[s..e]) < min {
+                    return None;
+                }
+            }
+            V::AzureAd => {
+                // gitleaks: preceded by start or one of \ ' " ` space > = : ( , ) and
+                // followed by end or one of \ ' " ` space < ) ,
+                let bytes = text.as_bytes();
+                let ok_prev = s == 0 || matches!(bytes[s - 1], b'\\' | b'\'' | b'"' | b'`' | b' ' | b'\t' | b'\n' | b'\r' | b'>' | b'=' | b':' | b'(' | b',' | b')');
+                let ok_next = e == bytes.len() || matches!(bytes[e], b'\\' | b'\'' | b'"' | b'`' | b' ' | b'\t' | b'\n' | b'\r' | b'<' | b')' | b',');
+                if !ok_prev || !ok_next || shannon_entropy(&text[s..e]) < 3.0 {
                     return None;
                 }
             }
@@ -713,7 +825,8 @@ impl Detector {
         if key_denied(key) {
             return None;
         }
-        if weak_value(v) || is_reference(v) || is_type_name(v) || looks_like_path(v) || looks_like_url(v) {
+        let l = v.to_ascii_lowercase();
+        if weak_value_l(v, &l) || is_reference_prefix_l(&l) || is_dotted_ident(v) || is_type_name(v) || looks_like_path(v, &l) || looks_like_url(&l) {
             return None;
         }
         let bytes = text.as_bytes();
@@ -772,19 +885,18 @@ impl Detector {
         if rules.is_empty() {
             return;
         }
-        let mut ctx_seen = vec![false; rules.len()];
+        let b = text.as_bytes();
+        // Context-word rules only run just after a context word (value must follow it
+        // within ~40 chars on the same line).
+        let mut ctx_hits: Vec<Vec<(usize, usize)>> = vec![Vec::new(); rules.len()];
         if let Some(ac) = &self.inner.ctx_ac {
-            for m in ac.find_overlapping_iter(text.as_bytes()) {
+            for m in ac.find_overlapping_iter(b) {
                 for &i in &self.inner.ctx_rules[m.pattern().as_usize()] {
-                    ctx_seen[i] = true;
+                    ctx_hits[i].push((m.start(), m.end()));
                 }
             }
         }
-        let b = text.as_bytes();
         for (i, r) in rules.iter().enumerate() {
-            if !r.ctx.is_empty() && !ctx_seen[i] {
-                continue;
-            }
             match r.which {
                 Pii::Email if !text.contains('@') => continue,
                 Pii::Card => {
@@ -793,9 +905,31 @@ impl Detector {
                 }
                 _ => {}
             }
-            for m in r.re.find_iter(b) {
-                if let Some(c) = self.check_pii(text, r, m.start(), m.end()) {
-                    out.push(c);
+            if r.ctx.is_empty() {
+                for m in r.re.find_iter(b) {
+                    if let Some(c) = self.check_pii(text, r, m.start(), m.end()) {
+                        out.push(c);
+                    }
+                }
+                continue;
+            }
+            if ctx_hits[i].is_empty() {
+                continue;
+            }
+            ctx_hits[i].sort_unstable();
+            let mut wins: Vec<(usize, usize)> = Vec::new();
+            for &(hs, he) in &ctx_hits[i] {
+                let we = (he + CTX_WINDOW_BYTES).min(b.len());
+                match wins.last_mut() {
+                    Some(last) if hs <= last.1 => last.1 = last.1.max(we),
+                    _ => wins.push((hs, we)),
+                }
+            }
+            for (ws, we) in wins {
+                for m in r.re.find_iter(&b[ws..we]) {
+                    if let Some(c) = self.check_pii(text, r, ws + m.start(), ws + m.end()) {
+                        out.push(c);
+                    }
                 }
             }
         }
@@ -807,8 +941,17 @@ impl Detector {
         let next = b.get(e).copied();
         let alnum = |c: Option<u8>| c.is_some_and(|c| c.is_ascii_alphanumeric());
         let digit = |c: Option<u8>| c.is_some_and(|c| c.is_ascii_digit());
-        if !r.ctx.is_empty() && !has_context(text, s, r.ctx, 48) {
-            return None;
+        if !r.ctx.is_empty() {
+            // Cheap guards first: every context rule needs a standalone token.
+            if alnum(prev) || alnum(next) {
+                return None;
+            }
+            if r.which == Pii::Passport && !b[s..e].iter().any(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            if !has_context(text, s, r.ctx, CTX_WINDOW_CHARS) {
+                return None;
+            }
         }
         let v = &text[s..e];
         let (s, e, hint, conf) = match r.which {
@@ -885,13 +1028,16 @@ impl Detector {
                 // Walk alphanumerics until the country's length; spaces only between groups of 4.
                 let mut count = 0;
                 let mut end = s;
+                let mut prev_space = false;
                 for (i, c) in v.char_indices() {
                     if c == ' ' {
-                        if count % 4 != 0 {
+                        if count % 4 != 0 || prev_space {
                             return None;
                         }
+                        prev_space = true;
                         continue;
                     }
+                    prev_space = false;
                     count += 1;
                     end = s + i + 1;
                     if count == len {
@@ -911,8 +1057,7 @@ impl Detector {
                 if alnum(prev) || prev == Some(b'.') || alnum(next) || (next == Some(b'.') && digit(b.get(e + 1).copied())) {
                     return None;
                 }
-                let before = b[s.saturating_sub(12)..s].to_ascii_lowercase();
-                if before.ends_with(b"v") || contains_bytes(&before, b"version") || contains_bytes(&before, b"ver ") || contains_bytes(&before, b"build") {
+                if matches!(prev_word(b, s).as_str(), "version" | "ver" | "v" | "build" | "release" | "firmware" | "oid") {
                     return None;
                 }
                 let ip: std::net::Ipv4Addr = v.parse().ok()?;
@@ -1097,30 +1242,30 @@ impl Detector {
 
     /// Exact value (case-insensitive) or, for email-shaped values, an allowlisted domain.
     fn allowlisted(&self, value: &str) -> bool {
+        if self.allow.is_empty() {
+            return false;
+        }
         let v = value.to_ascii_lowercase();
-        self.cfg.allowlist.iter().any(|a| {
-            let a = a.trim().to_ascii_lowercase();
-            !a.is_empty() && (v == a || (v.contains('@') && (v.ends_with(&format!("@{a}")) || v.ends_with(&format!(".{a}")))))
-        })
+        let email = v.contains('@');
+        self.allow.iter().any(|a| v == *a || (email && suffix_after(&v, a, b"@.")))
     }
 
     fn domain_allowlisted(&self, domain: &str) -> bool {
         let d = domain.to_ascii_lowercase();
-        self.cfg.allowlist.iter().any(|a| {
-            let a = a.trim().to_ascii_lowercase();
-            !a.is_empty() && !a.contains('@') && (d == a || d.ends_with(&format!(".{a}")))
-        })
+        self.allow.iter().any(|a| !a.contains('@') && (d == *a || suffix_after(&d, a, b".")))
     }
 
     /// URL hosts: only dotted allowlist entries count (`example.com`), so a password in
     /// `postgres://u:p@localhost` is still masked.
     fn url_host_allowlisted(&self, host: &str) -> bool {
         let h = host.to_ascii_lowercase();
-        self.cfg.allowlist.iter().any(|a| {
-            let a = a.trim().to_ascii_lowercase();
-            a.contains('.') && !a.contains('@') && (h == a || h.ends_with(&format!(".{a}")))
-        })
+        self.allow.iter().any(|a| a.contains('.') && !a.contains('@') && (h == *a || suffix_after(&h, a, b".")))
     }
+}
+
+/// `v` ends with `suffix` and the byte before it is one of `seps`.
+fn suffix_after(v: &str, suffix: &str, seps: &[u8]) -> bool {
+    v.len() > suffix.len() && v.ends_with(suffix) && seps.contains(&v.as_bytes()[v.len() - suffix.len() - 1])
 }
 
 /// Overlap resolution: strongest priority first, then longest, then most confident.
@@ -1185,7 +1330,11 @@ fn word_bounded(text: &str, start: usize, end: usize) -> bool {
 
 /// Template-looking values that are never real secrets (applies to every rule).
 fn is_templated(v: &str) -> bool {
-    let l = v.to_ascii_lowercase();
+    is_templated_l(v, &v.to_ascii_lowercase())
+}
+
+/// [`is_templated`] with the ASCII-lowercased value precomputed.
+fn is_templated_l(v: &str, l: &str) -> bool {
     let b = v.as_bytes();
     v.starts_with('$')
         || (v.starts_with('%') && v.ends_with('%') && v.len() > 2)
@@ -1204,16 +1353,19 @@ fn is_templated(v: &str) -> bool {
         || l.contains("****")
         || l.contains("....")
         || l.contains('…')
-        || matches!(l.as_str(), "true" | "false" | "null" | "none" | "nil" | "undefined")
+        || matches!(l, "true" | "false" | "null" | "none" | "nil" | "undefined")
         || (b.len() >= 4 && b.iter().all(|&c| c == b[0]))
 }
 
 /// Placeholder-ish or reserved words for generic rules.
 fn weak_value(v: &str) -> bool {
-    if is_templated(v) {
+    weak_value_l(v, &v.to_ascii_lowercase())
+}
+
+fn weak_value_l(v: &str, l: &str) -> bool {
+    if is_templated_l(v, l) {
         return true;
     }
-    let l = v.to_ascii_lowercase();
     const PREFIXES: &[&str] = &[
         "your", "my_", "my-", "the_", "the-", "sample", "dummy", "fake_", "fake-", "test_", "test-", "insert", "replace",
         "enter_", "enter-", "put_", "put-", "some_", "some-", "default_", "demo_", "demo-", "xxx",
@@ -1225,7 +1377,7 @@ fn weak_value(v: &str) -> bool {
         "foobar", "user", "username",
     ];
     PREFIXES.iter().any(|p| l.starts_with(p))
-        || WORDS.contains(&l.as_str())
+        || WORDS.contains(&l)
         || l.ends_with("_here")
         || l.ends_with("-here")
         || (l.ends_with("here") && l.contains("key"))
@@ -1237,17 +1389,29 @@ fn is_reference(v: &str) -> bool {
 }
 
 fn is_reference_prefix(v: &str) -> bool {
+    is_reference_prefix_l(&v.to_ascii_lowercase())
+}
+
+fn is_reference_prefix_l(l: &str) -> bool {
     const PREFIXES: &[&str] = &[
         "process.env", "import.meta.env", "os.environ", "os.getenv", "getenv", "env.", "env(", "env[", "config.", "settings.",
         "secrets.", "vars.", "self.", "this.", "deno.env", "system.getenv", "environment.", "context.", "ctx.", "request.",
         "req.", "args.", "opts.", "options.", "params.", "props.",
     ];
-    let l = v.to_ascii_lowercase();
     PREFIXES.iter().any(|p| l.starts_with(p))
 }
 
-fn contains_bytes(hay: &[u8], needle: &[u8]) -> bool {
-    hay.windows(needle.len()).any(|w| w == needle)
+/// The ASCII word just before `pos`, skipping spaces and `:`/`=`, lowercased.
+fn prev_word(b: &[u8], pos: usize) -> String {
+    let mut i = pos;
+    while i > 0 && matches!(b[i - 1], b' ' | b'\t' | b':' | b'=') {
+        i -= 1;
+    }
+    let end = i;
+    while i > 0 && b[i - 1].is_ascii_alphabetic() {
+        i -= 1;
+    }
+    String::from_utf8_lossy(&b[i..end]).to_ascii_lowercase()
 }
 
 /// `a.b`, `foo.bar_baz.qux` — member access, not a secret.
@@ -1267,17 +1431,22 @@ fn is_dotted_ident(v: &str) -> bool {
 }
 
 fn is_type_name(v: &str) -> bool {
+    // Rust references: `&str`, `&mut String`, `&'a [u8]`, `&dyn Trait`.
+    if let Some(rest) = v.strip_prefix('&') {
+        let rest = rest.trim_start_matches("mut");
+        return rest.is_empty() || is_type_name(rest) || rest.starts_with('[') || rest.starts_with('\'') || rest.starts_with("dyn");
+    }
     matches!(
         v,
         "str" | "string" | "String" | "bool" | "boolean" | "Boolean" | "int" | "integer" | "Integer" | "number" | "Number"
             | "float" | "double" | "any" | "Any" | "None" | "Optional" | "object" | "Object" | "bytes" | "SecretStr"
-            | "Secret" | "SecretString" | "char" | "unknown" | "void" | "Text" | "text" | "varchar" | "VARCHAR"
+            | "Secret" | "SecretString" | "char" | "unknown" | "void" | "Text" | "text" | "varchar" | "VARCHAR" | "u8"
+            | "Vec" | "Zeroizing" | "SecretBox" | "Password" | "Token"
     ) || v.starts_with("Optional[")
         || v.starts_with("Option<")
 }
 
-fn looks_like_path(v: &str) -> bool {
-    let l = v.to_ascii_lowercase();
+fn looks_like_path(v: &str, l: &str) -> bool {
     v.starts_with('/')
         || v.starts_with("./")
         || v.starts_with("../")
@@ -1288,8 +1457,7 @@ fn looks_like_path(v: &str) -> bool {
             .any(|x| l.ends_with(x))
 }
 
-fn looks_like_url(v: &str) -> bool {
-    let l = v.to_ascii_lowercase();
+fn looks_like_url(l: &str) -> bool {
     (l.starts_with("http://") || l.starts_with("https://") || l.starts_with("file://")) && !l.contains('@')
 }
 
@@ -1310,20 +1478,134 @@ fn key_denied(key: &str) -> bool {
         prev_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
         s.push(c.to_ascii_lowercase());
     }
-    const DENY: &[&str] = &[
-        "public", "pub", "csrf", "xsrf", "integrity", "checksum", "digest", "etag", "hash", "hashed", "sha", "sha1",
-        "sha256", "sha512", "md5", "nonce", "commit", "revision", "resolved", "url", "uri", "endpoint", "path", "file",
-        "filename", "dir", "directory", "name", "id", "ids", "length", "len", "size", "count", "limit", "min", "max",
-        "type", "types", "policy", "field", "label", "placeholder", "input", "prompt", "hint", "pattern", "regex",
-        "rule", "rules", "reset", "expiry", "expires", "expiration", "ttl", "usage", "budget", "header", "param",
-        "version", "format", "algorithm", "alg", "strength", "enabled", "required", "provider", "location", "ref",
-        "arn", "tokenizer", "keyboard", "keycode", "keypress", "keystroke", "keyword", "keywords", "kind", "mode",
-        "style", "prefix", "suffix", "less", "manager", "store", "storage", "env", "var", "source", "server",
-        "address", "host", "port", "user", "username", "login", "email", "visible", "show", "toggle", "icon",
-        "button", "error", "errors", "message", "text", "title", "description", "help", "validation", "valid",
-        "invalid", "confirm", "match", "matches", "changed", "change", "forgot", "new", "old", "current",
-    ];
-    s.split(|c: char| !c.is_ascii_alphanumeric()).any(|w| DENY.contains(&w))
+    s.split(|c: char| !c.is_ascii_alphanumeric()).any(denied_word)
+}
+
+fn denied_word(w: &str) -> bool {
+    matches!(
+        w,
+        "public"
+            | "pub"
+            | "csrf"
+            | "xsrf"
+            | "integrity"
+            | "checksum"
+            | "digest"
+            | "etag"
+            | "hash"
+            | "hashed"
+            | "sha"
+            | "sha1"
+            | "sha256"
+            | "sha512"
+            | "md5"
+            | "nonce"
+            | "commit"
+            | "revision"
+            | "resolved"
+            | "url"
+            | "uri"
+            | "endpoint"
+            | "path"
+            | "file"
+            | "filename"
+            | "dir"
+            | "directory"
+            | "name"
+            | "id"
+            | "ids"
+            | "length"
+            | "len"
+            | "size"
+            | "count"
+            | "limit"
+            | "min"
+            | "max"
+            | "type"
+            | "types"
+            | "policy"
+            | "field"
+            | "label"
+            | "placeholder"
+            | "input"
+            | "prompt"
+            | "hint"
+            | "pattern"
+            | "regex"
+            | "rule"
+            | "rules"
+            | "reset"
+            | "expiry"
+            | "expires"
+            | "expiration"
+            | "ttl"
+            | "usage"
+            | "budget"
+            | "header"
+            | "param"
+            | "version"
+            | "format"
+            | "algorithm"
+            | "alg"
+            | "strength"
+            | "enabled"
+            | "required"
+            | "provider"
+            | "location"
+            | "ref"
+            | "arn"
+            | "tokenizer"
+            | "keyboard"
+            | "keycode"
+            | "keypress"
+            | "keystroke"
+            | "keyword"
+            | "keywords"
+            | "kind"
+            | "mode"
+            | "style"
+            | "prefix"
+            | "suffix"
+            | "less"
+            | "manager"
+            | "store"
+            | "storage"
+            | "env"
+            | "var"
+            | "source"
+            | "server"
+            | "address"
+            | "host"
+            | "port"
+            | "user"
+            | "username"
+            | "login"
+            | "email"
+            | "visible"
+            | "show"
+            | "toggle"
+            | "icon"
+            | "button"
+            | "error"
+            | "errors"
+            | "message"
+            | "text"
+            | "title"
+            | "description"
+            | "help"
+            | "validation"
+            | "valid"
+            | "invalid"
+            | "confirm"
+            | "match"
+            | "matches"
+            | "changed"
+            | "change"
+            | "forgot"
+            | "new"
+            | "old"
+            | "current"
+    )
 }
 
 /// A short, value-free description of the key (`DB_PASSWORD`), or `None`.
@@ -1364,18 +1646,37 @@ fn host_of(s: &str) -> &str {
     &s[..end]
 }
 
-/// Context word present in the `window` bytes before `start` on the same line.
+/// Context word present in the `window` chars before `start` on the same line.
 fn has_context(text: &str, start: usize, words: &[&str], window: usize) -> bool {
-    let mut lo = start.saturating_sub(window);
-    while lo < start && !text.is_char_boundary(lo) {
-        lo += 1;
-    }
+    let lo = text[..start].char_indices().rev().take(window).last().map_or(start, |(i, _)| i);
     let mut w = &text[lo..start];
     if let Some(p) = w.rfind('\n') {
         w = &w[p + 1..];
     }
-    let l = w.to_lowercase();
+    let l = normalize_bengali(&w.to_lowercase());
     words.iter().any(|k| contains_word(&l, k))
+}
+
+/// Composes the Bengali nukta letters and two-part vowel signs that keyboards emit
+/// decomposed, so context words match either form.
+fn normalize_bengali(s: &str) -> String {
+    if !s.bytes().any(|b| b == 0xE0) {
+        return s.to_string();
+    }
+    s.replace("\u{9AF}\u{9BC}", "\u{9DF}")
+        .replace("\u{9A1}\u{9BC}", "\u{9DC}")
+        .replace("\u{9A2}\u{9BC}", "\u{9DD}")
+        .replace("\u{9C7}\u{9BE}", "\u{9CB}")
+        .replace("\u{9C7}\u{9D7}", "\u{9CC}")
+}
+
+/// The decomposed spelling of a Bengali word (inverse of [`normalize_bengali`]).
+fn decompose_bengali(s: &str) -> String {
+    s.replace('\u{9DF}', "\u{9AF}\u{9BC}")
+        .replace('\u{9DC}', "\u{9A1}\u{9BC}")
+        .replace('\u{9DD}', "\u{9A2}\u{9BC}")
+        .replace('\u{9CB}', "\u{9C7}\u{9BE}")
+        .replace('\u{9CC}', "\u{9C7}\u{9D7}")
 }
 
 /// `hay` contains `word`; ASCII-alphanumeric words must not touch other ASCII letters.
@@ -1880,3 +2181,4 @@ mod tests {
         }
     }
 }
+
