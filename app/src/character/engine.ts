@@ -181,23 +181,21 @@ type Tier = 0 | 1 | 2;
 
 /** Eye metrics per tier, in head radii: width, height, spacing, height offset. */
 const EYES: Record<Tier, readonly [number, number, number, number]> = {
-  0: [0.34, 0.46, 0.39, 0.09],
+  0: [0.35, 0.47, 0.39, 0.09],
   1: [0.32, 0.44, 0.38, 0.07],
-  2: [0.3, 0.42, 0.37, 0.07],
+  2: [0.31, 0.44, 0.37, 0.07],
 };
 
 /** Ponytail locks: a cubic centre line from the top of the hair-tie, in head radii. */
 const LOCKS: readonly { p: readonly number[]; w: number; tier: Tier; flex: number }[] = [
-  // The main tail: up out of the tie, over to the right and down behind the head.
-  { p: [0, 0, 0.05, -0.56, 0.8, -0.64, 1.04, 0.4], w: 0.2, tier: 0, flex: 1 },
-  // The top curl, riding highest.
-  { p: [0, 0, -0.06, -0.52, 0.36, -0.8, 0.74, -0.62], w: 0.15, tier: 1, flex: 0.7 },
-  // A lock flying out to the right.
-  { p: [0.02, -0.02, 0.5, -0.26, 0.92, -0.34, 1.24, -0.06], w: 0.11, tier: 1, flex: 1.1 },
-  // A long lower strand.
-  { p: [0.02, 0, 0.42, -0.18, 0.9, 0.0, 0.98, 0.64], w: 0.09, tier: 1, flex: 1.25 },
+  // One glossy swoosh made of a few locks that rise out of the tie, arc over to
+  // the right and fall behind the head, ending in staggered points.
+  { p: [0, 0, 0.05, -0.55, 0.78, -0.66, 1.02, 0.38], w: 0.21, tier: 0, flex: 1 },
+  { p: [0, 0, -0.02, -0.62, 0.52, -0.84, 0.88, -0.36], w: 0.15, tier: 1, flex: 0.75 },
+  { p: [0.02, 0, 0.2, -0.42, 0.86, -0.5, 1.14, 0.1], w: 0.13, tier: 1, flex: 1.1 },
+  { p: [0.02, 0, 0.36, -0.24, 0.86, -0.2, 0.9, 0.62], w: 0.1, tier: 1, flex: 1.25 },
   // A little flick forward off the top.
-  { p: [0, -0.02, -0.24, -0.24, -0.18, -0.5, 0.08, -0.6], w: 0.1, tier: 1, flex: 0.5 },
+  { p: [0, -0.02, -0.18, -0.26, -0.14, -0.5, 0.1, -0.6], w: 0.09, tier: 1, flex: 0.5 },
   // A wisp curling off the end of the main tail.
   { p: [0.94, 0.06, 1.16, 0.2, 1.22, 0.46, 1.06, 0.8], w: 0.055, tier: 2, flex: 1.4 },
 ];
@@ -346,7 +344,7 @@ function sparklePath(x: CanvasRenderingContext2D, r: number) {
 
 /** Where the lid cuts each almond: inner and outer angles on the ellipse (degrees). */
 const CUT = {
-  pill: [196, -52], angry: [186, -28], wide: [228, -100], cup: [214, -34], soft: [216, -84],
+  pill: [193, -47], angry: [186, -28], wide: [228, -100], cup: [214, -34], soft: [216, -84],
 } as const;
 
 /**
@@ -1308,9 +1306,9 @@ export class BotEngine {
     hg.addColorStop(0, "#4A322B");
     hg.addColorStop(0.5, "#33221E");
     hg.addColorStop(1, "#24170F");
-    x.lineJoin = "round";
-    x.lineWidth = Math.max(0.6, (tier === 0 ? 0.05 : 0.03) * u);
-    x.strokeStyle = "rgba(168,110,84,0.85)";
+    // The locks are outlined as one silhouette (all strokes, then all fills),
+    // so the rim traces the outside of the swoosh, not every strand.
+    const shapes: Path2D[] = [];
     for (const lock of LOCKS) {
       if (lock.tier > tier) continue;
       left.length = 0;
@@ -1338,17 +1336,21 @@ export class BotEngine {
         px = X;
         py = Y;
       }
-      x.beginPath();
-      x.moveTo(left[0], left[1]);
-      for (let i = 2; i < left.length; i += 2) x.lineTo(left[i], left[i + 1]);
-      x.lineTo(px, py);
-      for (let i = right.length - 2; i >= 0; i -= 2) x.lineTo(right[i], right[i + 1]);
-      x.closePath();
-      x.stroke();
-      x.fillStyle = hg;
-      x.fill();
+      const path = new Path2D();
+      path.moveTo(left[0], left[1]);
+      for (let i = 2; i < left.length; i += 2) path.lineTo(left[i], left[i + 1]);
+      path.lineTo(px, py);
+      for (let i = right.length - 2; i >= 0; i -= 2) path.lineTo(right[i], right[i + 1]);
+      path.closePath();
+      shapes.push(path);
     }
-    // A sheen along the main lock.
+    x.lineJoin = "round";
+    x.lineWidth = Math.max(0.8, (tier === 0 ? 0.06 : 0.045) * u);
+    x.strokeStyle = "rgba(160,104,80,0.8)";
+    for (const p of shapes) x.stroke(p);
+    x.fillStyle = hg;
+    for (const p of shapes) x.fill(p);
+    // Glossy sheen along the main lock and the top one.
     if (tier === 2) {
       const lock = LOCKS[0];
       x.strokeStyle = "rgba(150,100,80,0.6)";
