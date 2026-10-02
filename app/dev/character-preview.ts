@@ -1,9 +1,11 @@
-// Dev harness: renders Zuko deterministically — every state, every LED glyph,
-// mini bots, the launch greeting and the drop/scan sequence at fixed
-// timestamps — so a single headless screenshot shows the whole character.
-// Not part of the app bundle.
+// Dev harness: renders Zuko deterministically — every state, every eye glyph,
+// the concept-sheet expressions, the fire (punch, fireball flight, flick,
+// aura, hover ring), mini bots, the launch greeting and the drop/scan sequence
+// at fixed timestamps — so a single headless screenshot shows the whole
+// character. Not part of the app bundle.
 //
-//   /dev/character-preview.html?only=states,eyes,minis,sizes,greet,drop,icons
+//   /dev/character-preview.html?only=hero,concept,states,eyes,fire,minis,sizes,light,greet,drop,icons
+//   &hs=280 sets the hero size.
 
 import { BOT_STATES, BotEngine, hexToRGB, type EyeShape } from "../src/character/engine";
 import { Greeting } from "../src/character/greeting";
@@ -64,9 +66,33 @@ const STATES = Object.keys(BOT_STATES) as BotStateName[];
 
 if (want("hero")) {
   const row = section("Hero");
+  const hs = Number(params.get("hs") ?? 280);
   for (const [s, t] of [["idle", 0.7], ["approval", 1.9], ["error", 2.6], ["finished", 3.3]] as const) {
-    drawBot(row, posed(s, t), 280, s);
+    drawBot(row, posed(s, t), hs, s);
   }
+}
+
+if (want("concept")) {
+  // The concept sheet's emotes: neutral, happy, angry, thinking, excited, sleepy.
+  const row = section("Concept sheet expressions");
+  const sheet: [string, BotStateName, EyeShape | null, (e: BotEngine) => void][] = [
+    ["neutral", "idle", null, () => {}],
+    ["happy", "idle", "happy", () => {}],
+    ["angry", "error", null, () => {}],
+    ["thinking", "thinking", null, () => {}],
+    ["excited", "idle", "star", (e) => { e.boost = 0.8; }],
+    ["sleepy", "sleeping", null, () => {}],
+    ["love", "idle", "heart", (e) => { e.boost = 1; }],
+    ["surprised", "idle", "dot", () => {}],
+    ["wink", "idle", "wink", () => {}],
+    ["dizzy", "dizzy", null, () => {}],
+  ];
+  sheet.forEach(([label, st, eye, fn], i) => {
+    const e = posed(st, 0.6 + i * 0.31);
+    if (eye) e.eyeOverride = eye;
+    fn(e);
+    drawBot(row, e, 150, label);
+  });
 }
 
 if (want("states")) {
@@ -93,7 +119,7 @@ if (want("eyes")) {
   const row = section("LED glyphs");
   const eyes: EyeShape[] = [
     "pill", "wide", "dot", "line", "flat", "happy", "closed",
-    "spiral", "heart", "star", "tired", "wink", "cup",
+    "spiral", "heart", "star", "tired", "wink", "cup", "angry", "think",
   ];
   eyes.forEach((shape, i) => {
     const e = posed(i % 3 === 0 ? "idle" : i % 3 === 1 ? "thinking" : "approval", 0.9 + i * 0.13);
@@ -111,6 +137,76 @@ if (want("sizes")) {
     const ctx = cell(row, w, w + 16, `${d}px`);
     e.particleOverhang = 16;
     e.draw(ctx, w, w + 16);
+  }
+}
+
+/** A fresh engine posed `t` seconds into a punch / flick / swirl from rest. */
+function fireFrame(
+  kind: "punch" | "flick" | "swirl", t: number, target: { x: number; y: number } | null,
+  w: number, h: number, bx: number, by: number, R: number, state: BotStateName = "idle",
+) {
+  const e = posed(state, 0.9);
+  e.clock = 10;
+  const scratch = document.createElement("canvas").getContext("2d")!;
+  e.drawAt(scratch, bx, by, R);
+  if (kind === "punch") e.shootFire(target, { sound: false, kind: state === "error" ? "danger" : "ember" });
+  else if (kind === "flick") e.fireFlick(target, { sound: false });
+  else e.fireSwirl();
+  e.clock = 10 + t;
+  return (ctx: CanvasRenderingContext2D) => {
+    ctx.clearRect(0, 0, w, h);
+    e.drawAt(ctx, bx, by, R);
+    e.drawFx(ctx);
+  };
+}
+
+if (want("fire")) {
+  const W = 300, H = 150;
+  const target = { x: 270, y: 70 };
+  const row = section("Fire punch → fireball → burst (t in s, target at right)");
+  // &fs=2 doubles the punch frames to inspect the arm and swirl.
+  const fs = Number(params.get("fs") ?? 1);
+  const ft = params.get("ft")?.split(",").map(Number) ?? [0.07, 0.14, 0.2, 0.26, 0.32, 0.4, 0.5, 0.62, 0.8];
+  for (const t of ft) {
+    const ctx = cell(row, W * fs, H * fs, `${t}`);
+    ctx.scale(fs, fs);
+    fireFrame("punch", t, target, W, H, 60, 92, 30)(ctx);
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.strokeRect(target.x - 4, target.y - 4, 8, 8);
+  }
+  const row2 = section("Block (danger), upward shot, flick, swirl");
+  for (const t of [0.24, 0.36, 0.55]) {
+    fireFrame("punch", t, { x: 250, y: 30 }, W, H, 60, 92, 30, "error")(cell(row2, W, H, `block ${t}`));
+  }
+  for (const t of [0.12, 0.3, 0.5]) {
+    fireFrame("flick", t, { x: 200, y: 60 }, W, H, 60, 92, 30)(cell(row2, W, H, `flick ${t}`));
+  }
+  for (const t of [0.2, 0.45]) fireFrame("swirl", t, null, W, H, 150, 88, 30)(cell(row2, W, H, `swirl ${t}`));
+  const row3 = section("Aura, hover ring, ready stance, posed punch");
+  const au = posed("idle", 1.2); au.setFireAura(true); au.snapToState(); drawBot(row3, au, 150, "aura");
+  const au2 = posed("approval", 1.6); au2.setFireAura(true); au2.snapToState(); drawBot(row3, au2, 150, "approval + aura");
+  const rg = posed("working", 0.8); rg.setFireRing(true); rg.snapToState(); drawBot(row3, rg, 150, "hover ring");
+  const rg2 = posed("working", 2.1); rg2.setFireRing(true); rg2.snapToState(); drawBot(row3, rg2, 104, "ring 104");
+  const st = posed("idle", 1.1); st.morph = 1; st.slotH = 0.3; st.slotHTarget = 0.2;
+  {
+    const ctx = cell(row3, 150, 190, "ready stance");
+    st.particleOverhang = 40; st.draw(ctx, 150, 190); st.drawFx(ctx);
+  }
+  const pp = posed("idle", 1.4); pp.punch = 0.8; pp.punchAngle = -0.2; pp.fistFire = 0.9;
+  {
+    const ctx = cell(row3, 200, 190, "posed punch");
+    pp.drawAt(ctx, 70, 115, 37); pp.drawFx(ctx);
+  }
+}
+
+if (want("light")) {
+  const row = section("On light backgrounds", "light");
+  for (const [st, d] of [["idle", 110], ["approval", 62], ["working", 44], ["finished", 28], ["idle", 20]] as const) {
+    const e = posed(st, 1.1);
+    const w = d / 0.6;
+    const ctx = cell(row, w, w + 20, `${st} ${d}`, true);
+    e.particleOverhang = 20;
+    e.draw(ctx, w, w + 20);
   }
 }
 
