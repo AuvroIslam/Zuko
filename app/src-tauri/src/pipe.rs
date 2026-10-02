@@ -194,6 +194,7 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
         "ZukoExtension" => {
             let reply = firewall::handle_extension(&app, &payload).await;
             write_line(&mut pipe, &json!({ "reply": reply })).await;
+            linger(&mut pipe).await;
         }
         "PermissionRequest" => permission_request(&app, &mut pipe, payload, wants_reply).await,
         _ => {
@@ -201,6 +202,7 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
             let outcome = firewall::evaluate(&app, &payload).await;
             if wants_reply {
                 write_line(&mut pipe, &reply_object(outcome.stdout.clone())).await;
+                linger(&mut pipe).await;
             }
             pipe.finish();
             let verdict = outcome
@@ -252,6 +254,7 @@ async fn permission_request(app: &AppHandle, pipe: &mut impl Relay, payload: Val
     });
     if wants_reply {
         write_line(pipe, &reply_object(stdout)).await;
+        linger(pipe).await;
     }
     if let Some((allow, elapsed_ms)) = decision {
         firewall::record_permission(app, &payload, info.as_ref(), allow, elapsed_ms);
@@ -297,6 +300,24 @@ async fn write_line(pipe: &mut (impl AsyncWrite + Unpin), value: &Value) {
     line.push('\n');
     let _ = pipe.write_all(line.as_bytes()).await;
     let _ = pipe.flush().await;
+}
+
+/// Waits (briefly) for the relay to hang up after reading our reply.
+///
+/// Disconnecting a Windows pipe instance discards whatever the client has not
+/// read yet, and a reply carrying a rewritten file or a masked command output is
+/// far bigger than the pipe's buffer. The relay closes its end as soon as it has
+/// our newline, so this costs nothing when things work, and two seconds at worst.
+async fn linger(pipe: &mut (impl AsyncRead + Unpin)) {
+    let mut sink = [0u8; 256];
+    let _ = tokio::time::timeout(Duration::from_secs(2), async {
+        while let Ok(n) = pipe.read(&mut sink).await {
+            if n == 0 {
+                break;
+            }
+        }
+    })
+    .await;
 }
 
 /// The island's copy of a payload: no `tool_response` (it can be megabytes and the
@@ -497,6 +518,7 @@ mod tests {
                 let out = firewall::process(&served, &facts, &payload);
                 if payload["zuko_wants_reply"] == true {
                     write_line(&mut conn, &reply_object(out.stdout.clone())).await;
+                    linger(&mut conn).await;
                 }
                 let _ = conn.disconnect();
                 seen.push((event, payload));
@@ -537,6 +559,8 @@ mod tests {
             "tool_name": "Bash", "tool_input": {"command": "ls"}})).await.unwrap();
         let (blocked, _) = run("UserPromptSubmit", json!({"hook_event_name": "UserPromptSubmit", "session_id": "e2e", "cwd": cwd,
             "prompt": format!("my key is {key}")})).await.unwrap();
+        // Far past the old 2000-char truncation; small enough for a debug-build scan
+        // to stay inside the relay's 1.5 s budget.
         let big = "y".repeat(1 << 20);
         let (masked, t4) = run("PostToolUse", json!({"hook_event_name": "PostToolUse", "session_id": "e2e", "cwd": cwd,
             "transcript_path": "C:\\t.jsonl",

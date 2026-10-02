@@ -25,6 +25,26 @@ pub struct LocalTime {
     pub second: u32,
 }
 
+/// The directory named by an override variable — `ZUKO_CONFIG_DIR` (preferences
+/// and policy) or `ZUKO_DATA_DIR` (relay, vault, audit log, inbox, zuko.log) —
+/// when it is set to an absolute path. Development builds, end-to-end runs and
+/// the relay's fallback use these to stay away from the real profile; the relay
+/// honours the same variables, so both sides always agree.
+///
+/// Unit tests never get the real directories, whatever the environment says:
+/// everything lands in a per-process folder under the system temp dir.
+pub fn dir_override(var: &str) -> Option<PathBuf> {
+    #[cfg(test)]
+    {
+        let leaf = if var == "ZUKO_CONFIG_DIR" { "config" } else { "data" };
+        Some(std::env::temp_dir().join(format!("zuko-test-{}", std::process::id())).join(leaf))
+    }
+    #[cfg(not(test))]
+    {
+        std::env::var_os(var).map(PathBuf::from).filter(|p| p.is_absolute())
+    }
+}
+
 /// The user's home directory, where `.claude/settings.json` lives.
 pub fn home_dir() -> PathBuf {
     std::env::var_os(HOME_VAR)

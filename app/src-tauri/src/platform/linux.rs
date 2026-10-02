@@ -39,16 +39,16 @@ fn xdg(var: &str, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| home_dir().join(fallback))
 }
 
-/// ~/.config/zuko — preferences.
+/// ~/.config/zuko — preferences (or `ZUKO_CONFIG_DIR`, see `dir_override`).
 pub fn config_dir() -> PathBuf {
-    xdg("XDG_CONFIG_HOME", ".config").join("zuko")
+    super::dir_override("ZUKO_CONFIG_DIR").unwrap_or_else(|| xdg("XDG_CONFIG_HOME", ".config").join("zuko"))
 }
 
 /// ~/.local/share/zuko — where zuko-hook, the inbox and the log live. The
 /// relay has to sit at a stable path: an AppImage is mounted somewhere new on
 /// every launch.
 pub fn local_dir() -> PathBuf {
-    xdg("XDG_DATA_HOME", ".local/share").join("zuko")
+    super::dir_override("ZUKO_DATA_DIR").unwrap_or_else(|| xdg("XDG_DATA_HOME", ".local/share").join("zuko"))
 }
 
 /// Environment the webview must inherit, set before any thread or process
