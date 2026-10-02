@@ -13,3 +13,12 @@ not part of this repository:
 
 Zuko ships its own name, character, icon and sounds. Any remaining reference to
 Coucou in the code is a leftover from the import that is being replaced.
+
+## Other credits
+
+- Secret detection rules are derived from [gitleaks](https://github.com/gitleaks/gitleaks)
+  (MIT); see `app/core/THIRD_PARTY.md`.
+- The browser extension bundles [pdf.js](https://github.com/mozilla/pdf.js) (Apache-2.0)
+  for PDF text extraction, and its design draws on ideas from
+  [Redacto](https://github.com/HunKonTech/Redacto) (Apache-2.0) and
+  [Better-DeepSeek](https://github.com/EdgeTypE/better-deepseek/) (MIT).
