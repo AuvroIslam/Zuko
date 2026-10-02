@@ -500,5 +500,13 @@ export function playScene(name: string, island: Island) {
     island.launch();
     return;
   }
+  // Headless screenshots get almost no frames: switch transitions off and snap
+  // the geometry so the first painted frame is the settled one.
+  if (new URLSearchParams(window.location.search).has("still")) {
+    const style = document.createElement("style");
+    style.textContent = "*,*::before,*::after{transition:none!important;animation-delay:0s!important}";
+    document.head.append(style);
+    for (const ms of [0, 60, 200, 500]) window.setTimeout(() => island.snapGeometry(), ms);
+  }
   scene(island);
 }

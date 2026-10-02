@@ -508,6 +508,20 @@ export class Island {
     this.ensureRunning();
   }
 
+  /** Jumps every size and position to its target (dev scenes and screenshots). */
+  snapGeometry() {
+    const { w, h, r } = this.targetSize();
+    this.width.jump(w);
+    this.height.jump(h);
+    this.radius.jump(r);
+    this.updateBotTargets();
+    this.botCx.set(this.botCx.target);
+    this.botCy.set(this.botCy.target);
+    this.botSize.set(this.botSize.target);
+    this.dirty = true;
+    this.ensureRunning();
+  }
+
   private applyGeometry() {
     const w = this.width.value;
     const hh = this.height.value;

@@ -92,7 +92,7 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   // The feed is a list: Zuko keeps watch from the top-left corner instead of the
   // vertical centre.
   activity: { height: 284, botX: 52, botY: 90, botDiameter: 44, agentMode: "none" },
-  privacy: { height: 196, botX: 62, botY: null, botDiameter: 54, agentMode: "column" },
+  privacy: { height: 206, botX: 62, botY: null, botDiameter: 54, agentMode: "column" },
 };
 
 /**

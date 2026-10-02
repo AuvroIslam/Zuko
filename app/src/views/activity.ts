@@ -173,6 +173,7 @@ export function buildPrivacy(actions: ViewActions): ViewHost {
       if (names.length > 4) labels.append(h("span", { class: "pv-chip more", text: `+${names.length - 4}` }));
       if (!blocked && !names.length) labels.append(h("span", { class: "pv-chip", text: t.detail }));
       labels.style.display = labels.childElementCount ? "" : "none";
+      labels.classList.toggle("blocked", blocked);
 
       masked.textContent = e.maskedPrompt ?? "";
       masked.style.display = blocked && e.maskedPrompt ? "" : "none";
