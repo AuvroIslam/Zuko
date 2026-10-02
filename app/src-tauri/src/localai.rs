@@ -207,7 +207,7 @@ impl LocalAi {
 
     /// One `/api/chat` call with JSON output, temperature 0, bounded by `timeoutMs`
     /// (the wait for a free slot included). Returns the message content.
-    async fn chat(&self, cfg: &LocalAiConfig, messages: Value) -> Result<String, AiError> {
+    async fn chat(&self, cfg: &LocalAiConfig, messages: Value, max_tokens: u32) -> Result<String, AiError> {
         let base = LocalAi::base(cfg)?;
         let body = json!({
             "model": cfg.model.trim(),
@@ -215,7 +215,7 @@ impl LocalAi {
             "stream": false,
             "format": "json",
             "keep_alive": KEEP_ALIVE,
-            "options": { "temperature": 0, "num_predict": 512 },
+            "options": { "temperature": 0, "num_predict": max_tokens },
         });
         let work = async {
             let _slot = self.permits.acquire().await.map_err(|_| AiError::Http("client closed".into()))?;
@@ -263,7 +263,7 @@ impl LocalAi {
     /// measures a real call). The answer is still cached.
     pub async fn deep_scan_fresh(&self, cfg: &LocalAiConfig, text: &str) -> Result<Vec<AiFinding>, AiError> {
         let key = LocalAi::cache_key(cfg, "scan", text);
-        let answer = self.chat(cfg, core::deep_scan_messages(text)).await?;
+        let answer = self.chat(cfg, core::deep_scan_messages(text), 512).await?;
         let found = core::parse_deep_scan(&answer, text).map_err(AiError::BadAnswer)?;
         self.scans.lock().unwrap().put(key, found.clone());
         Ok(found)
@@ -276,7 +276,7 @@ impl LocalAi {
         if let Some(hit) = self.explanations.lock().unwrap().get(&key) {
             return Ok(hit);
         }
-        let answer = self.chat(cfg, messages).await?;
+        let answer = self.chat(cfg, messages, 200).await?;
         let text = core::parse_explanation(&answer).ok_or_else(|| AiError::BadAnswer("no usable explanation".into()))?;
         self.explanations.lock().unwrap().put(key, text.clone());
         Ok(text)
