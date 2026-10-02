@@ -7,12 +7,15 @@
 //! * The vault itself holds plaintext; persistence and encryption are the caller's job
 //!   (the app encrypts it with a key held in the OS keyring).
 //! * Exact-value matching across texts goes through [`Vault::find_values`], an
-//!   Aho-Corasick automaton over every stored value (and its JSON-escaped form),
-//!   rebuilt lazily after changes.
+//!   Aho-Corasick automaton over every stored value (and its JSON-escaped forms),
+//!   rebuilt lazily on the first search after a change. Value/key lookups are kept up
+//!   to date incrementally, so interning many values in a row stays cheap.
+//! * Values that contain a well-formed placeholder are never interned (they would make
+//!   rehydration ambiguous), and loading a hand-edited file drops duplicate values/keys.
 
 use crate::detect::{Category, Finding};
 use crate::placeholder;
-use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
+use aho_corasick::{AhoCorasick, AhoCorasickBuilder, AhoCorasickKind, MatchKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
@@ -69,19 +72,26 @@ pub struct Vault {
     index: VaultIndex,
 }
 
-/// Lookup tables rebuilt from `entries` (not serialized). Shared by clones until a
-/// mutation invalidates them.
+/// Lookup tables derived from `entries` (not serialized). Shared by clones until a
+/// mutation touches them.
 #[derive(Clone, Debug, Default)]
 struct VaultIndex {
-    tables: OnceLock<Arc<Tables>>,
+    /// Value/key → entry index; updated in place on insert, rebuilt after removals.
+    lookup: OnceLock<Arc<Lookup>>,
+    /// Aho-Corasick over values; rebuilt lazily after any change.
+    matcher: OnceLock<Arc<Matcher>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct Lookup {
+    by_value: HashMap<String, usize>,
+    by_key: HashMap<String, usize>,
 }
 
 #[derive(Debug)]
-struct Tables {
-    by_value: HashMap<String, usize>,
-    by_key: HashMap<String, usize>,
-    /// Patterns: each value, plus its JSON-escaped form when different.
-    matcher: Option<AhoCorasick>,
+struct Matcher {
+    /// Patterns: each value, plus its JSON-escaped forms when different.
+    ac: Option<AhoCorasick>,
     /// Pattern index → entry index.
     pattern_entry: Vec<usize>,
 }
@@ -99,6 +109,38 @@ fn json_escaped(v: &str) -> String {
     s[1..s.len() - 1].to_string()
 }
 
+/// JSON escaping with every non-ASCII char as `\uXXXX` (Python's `json.dumps` default).
+fn json_escaped_ascii(v: &str) -> String {
+    let mut out = String::with_capacity(v.len() + 8);
+    for c in json_escaped(v).chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            let mut buf = [0u16; 2];
+            for u in c.encode_utf16(&mut buf) {
+                out.push_str(&format!("\\u{:04x}", u));
+            }
+        }
+    }
+    out
+}
+
+/// The forms of `v` searched for in texts: raw, JSON-escaped, ASCII-JSON-escaped.
+fn value_forms(v: &str) -> Vec<String> {
+    let mut forms = vec![v.to_string()];
+    let esc = json_escaped(v);
+    if esc != v {
+        forms.push(esc);
+    }
+    if !v.is_ascii() {
+        let a = json_escaped_ascii(v);
+        if !forms.contains(&a) {
+            forms.push(a);
+        }
+    }
+    forms
+}
+
 impl Vault {
     pub fn new() -> Self {
         Self::default()
@@ -106,6 +148,15 @@ impl Vault {
 
     pub fn from_json(s: &str) -> Result<Self, String> {
         let mut v: Vault = serde_json::from_str(s).map_err(|e| e.to_string())?;
+        // Drop malformed or duplicate entries from hand-edited or merged files.
+        let mut seen_values = std::collections::HashSet::new();
+        let mut seen_keys = std::collections::HashSet::new();
+        v.entries.retain(|e| {
+            !e.value.is_empty()
+                && placeholder::parse(&e.key).is_some()
+                && seen_values.insert(e.value.clone())
+                && seen_keys.insert(e.key.clone())
+        });
         // Repair counters so a hand-edited or merged file never reuses a key.
         for e in &v.entries {
             if let Some((kind, n)) = placeholder::parse(&e.key) {
@@ -127,34 +178,40 @@ impl Vault {
         self.index = VaultIndex::default();
     }
 
-    fn tables(&self) -> Arc<Tables> {
+    fn lookup(&self) -> &Lookup {
+        self.index.lookup.get_or_init(|| {
+            let mut l = Lookup::default();
+            for (i, e) in self.entries.iter().enumerate() {
+                l.by_value.insert(e.value.clone(), i);
+                l.by_key.insert(e.key.clone(), i);
+            }
+            Arc::new(l)
+        })
+    }
+
+    fn matcher(&self) -> Arc<Matcher> {
         self.index
-            .tables
+            .matcher
             .get_or_init(|| {
-                let mut by_value = HashMap::new();
-                let mut by_key = HashMap::new();
                 let mut patterns = Vec::new();
                 let mut pattern_entry = Vec::new();
                 for (i, e) in self.entries.iter().enumerate() {
-                    by_value.insert(e.value.clone(), i);
-                    by_key.insert(e.key.clone(), i);
-                    patterns.push(e.value.clone());
-                    pattern_entry.push(i);
-                    let esc = json_escaped(&e.value);
-                    if esc != e.value {
-                        patterns.push(esc);
+                    for f in value_forms(&e.value) {
+                        patterns.push(f);
                         pattern_entry.push(i);
                     }
                 }
-                let matcher = if patterns.is_empty() {
+                let ac = if patterns.is_empty() {
                     None
                 } else {
+                    // A contiguous NFA builds fast even for long values (private keys).
                     AhoCorasickBuilder::new()
                         .match_kind(MatchKind::LeftmostLongest)
+                        .kind(Some(AhoCorasickKind::ContiguousNFA))
                         .build(&patterns)
                         .ok()
                 };
-                Arc::new(Tables { by_value, by_key, matcher, pattern_entry })
+                Arc::new(Matcher { ac, pattern_entry })
             })
             .clone()
     }
@@ -163,7 +220,10 @@ impl Vault {
         if value.is_empty() || (category != Category::Custom && value.chars().count() < MIN_VALUE_LEN) {
             return None;
         }
-        if let Some(&i) = self.tables().by_value.get(value) {
+        if value.contains(placeholder::OPEN) && !placeholder::find_all(value).is_empty() {
+            return None;
+        }
+        if let Some(&i) = self.lookup().by_value.get(value) {
             let e = &mut self.entries[i];
             e.hits += 1;
             e.last_used = now;
@@ -173,6 +233,7 @@ impl Vault {
         let n = self.counters.entry(kind.clone()).or_insert(0);
         *n += 1;
         let key = placeholder::key(&kind, *n);
+        let idx = self.entries.len();
         self.entries.push(Entry {
             key: key.clone(),
             value: value.to_string(),
@@ -185,7 +246,15 @@ impl Vault {
             last_used: now,
             hits: 1,
         });
-        self.invalidate();
+        // Keep the lookup current in place (copy-on-write if a clone shares it); the
+        // matcher is rebuilt on the next search.
+        if let Some(arc) = self.index.lookup.take() {
+            let mut l = Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone());
+            l.by_value.insert(value.to_string(), idx);
+            l.by_key.insert(key.clone(), idx);
+            let _ = self.index.lookup.set(Arc::new(l));
+        }
+        self.index.matcher = OnceLock::new();
         Some(key)
     }
 
@@ -202,12 +271,12 @@ impl Vault {
     }
 
     pub fn get(&self, key: &str) -> Option<&Entry> {
-        let key = key.trim_start_matches(placeholder::OPEN).trim_end_matches(placeholder::CLOSE);
-        self.tables().by_key.get(key).map(|&i| &self.entries[i])
+        let key = key.trim_start_matches(placeholder::OPEN).trim_end_matches(placeholder::CLOSE).trim_matches(' ');
+        self.lookup().by_key.get(key).map(|&i| &self.entries[i])
     }
 
     pub fn key_for_value(&self, value: &str) -> Option<&str> {
-        self.tables().by_value.get(value).map(|&i| self.entries[i].key.as_str())
+        self.lookup().by_value.get(value).map(|&i| self.entries[i].key.as_str())
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -258,10 +327,11 @@ impl Vault {
 
     /// Every exact occurrence of any stored value in `text`, leftmost-longest,
     /// non-overlapping, sorted. Also matches the JSON-escaped form of values that
-    /// contain `"` or `\`.
+    /// contain `"`, `\` or control chars, and the `\uXXXX`-escaped form of non-ASCII
+    /// values. Offsets are char boundaries.
     pub fn find_values(&self, text: &str) -> Vec<ValueMatch> {
-        let t = self.tables();
-        let Some(ac) = &t.matcher else { return Vec::new() };
+        let t = self.matcher();
+        let Some(ac) = &t.ac else { return Vec::new() };
         ac.find_iter(text)
             .map(|m| ValueMatch {
                 start: m.start(),
@@ -288,7 +358,7 @@ impl Vault {
 
     /// Marks `key` as used (rehydrated) at `now`.
     pub fn touch(&mut self, key: &str, now: u64) {
-        if let Some(&i) = self.tables().by_key.get(key) {
+        if let Some(&i) = self.lookup().by_key.get(key) {
             self.entries[i].last_used = now;
         }
     }

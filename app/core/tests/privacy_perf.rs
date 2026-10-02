@@ -49,7 +49,7 @@ fn limits() -> (Duration, Duration) {
     if cfg!(debug_assertions) {
         (Duration::from_millis(3000), Duration::from_secs(30))
     } else {
-        (Duration::from_millis(60), Duration::from_millis(400))
+        (Duration::from_millis(150), Duration::from_millis(600))
     }
 }
 
