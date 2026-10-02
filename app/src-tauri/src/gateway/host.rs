@@ -152,8 +152,8 @@ impl Host {
         }
         self.trace(format!("  local AI learned [{}]", learned.new_keys.join(", ")));
         self.persist_vault();
-        if let (Host::App(app), Some(engine)) = (self, self.engine()) {
-            crate::localai::announce_learned(app, engine, learned, "gateway", session_id);
+        if let Host::App(app) = self {
+            crate::localai::announce_learned(app, learned, "gateway", session_id);
         }
     }
 

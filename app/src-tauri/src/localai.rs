@@ -551,7 +551,7 @@ pub fn spawn(app: &AppHandle, job: AiJob) {
         match job {
             AiJob::Learn { text, session_id } => {
                 if let Ok(learned) = learn(&engine, &text, true).await {
-                    announce_learned(&app, &engine, &learned, "hook", Some(session_id));
+                    announce_learned(&app, &learned, "hook", Some(session_id));
                 }
             }
             AiJob::Explain { input, request_id, activity_id } => {
@@ -592,7 +592,7 @@ pub fn deliver_explanation(app: &AppHandle, ex: AiExplain) {
 }
 
 /// Tells the user what a deep scan taught the vault (keys and labels, never values).
-pub fn announce_learned(app: &AppHandle, engine: &Engine, learned: &Learned, source: &str, session_id: Option<String>) {
+pub fn announce_learned(app: &AppHandle, learned: &Learned, source: &str, session_id: Option<String>) {
     if learned.new_keys.is_empty() {
         return;
     }
@@ -615,7 +615,6 @@ pub fn announce_learned(app: &AppHandle, engine: &Engine, learned: &Learned, sou
             ..Default::default()
         },
     );
-    let _ = engine;
     events::protection_changed(app);
 }
 
