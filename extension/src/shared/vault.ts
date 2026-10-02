@@ -43,6 +43,45 @@ export function mergeVaults(
   return { vault: { entries, counters }, renamed };
 }
 
+/**
+ * Add-only merge for what the local AI learned: every `local` entry stays exactly as it is
+ * (same key, same value, same order), and each `remote` entry whose value is new is appended.
+ * An incoming entry whose key is taken by a different local value gets a fresh number; nothing
+ * local is ever renamed or dropped, so placeholders already in the page stay valid.
+ */
+export function mergeAddOnly(
+  local: VaultJson,
+  remote: VaultJson,
+): { vault: VaultJson; added: Array<{ key: string; label: string }> } {
+  const entries: VaultEntry[] = local.entries.map((e) => ({ ...e }));
+  const values = new Set(entries.map((e) => e.value));
+  const usedKeys = new Set(entries.map((e) => e.key));
+  const counters: Record<string, number> = { ...local.counters };
+  const bump = (key: string) => {
+    const p = parseKey(key);
+    if (p && (counters[p.kind] ?? 0) < p.n) counters[p.kind] = p.n;
+  };
+  entries.forEach((e) => bump(e.key));
+  const added: Array<{ key: string; label: string }> = [];
+  for (const e of remote.entries) {
+    if (typeof e.value !== "string" || e.value === "" || values.has(e.value)) continue;
+    let key = e.key;
+    if (usedKeys.has(key)) {
+      const kind = parseKey(key)?.kind ?? e.kind;
+      let n = Math.max(counters[kind] ?? 0, remote.counters?.[kind] ?? 0) + 1;
+      while (usedKeys.has(`${kind}_${n}`)) n++;
+      key = `${kind}_${n}`;
+    }
+    usedKeys.add(key);
+    values.add(e.value);
+    entries.push({ ...e, key });
+    bump(key);
+    added.push({ key, label: e.label });
+  }
+  for (const [kind, n] of Object.entries(remote.counters ?? {})) if ((counters[kind] ?? 0) < n) counters[kind] = n;
+  return { vault: { entries, counters }, added };
+}
+
 // ---------------------------------------------------------------------------------------
 // Needles
 

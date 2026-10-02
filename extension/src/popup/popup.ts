@@ -12,6 +12,7 @@ interface Status {
   linked: boolean;
   appVersion: string | null;
   linkError: string | null;
+  localAi: { enabled: boolean; reachable: boolean; model: string; waitForPromptScan: boolean } | null;
   vaultSize: number;
   prefs: { sites: Record<SiteId, boolean> };
   total: { masked: number; blocked: number; uploads: number; restored: number };
@@ -86,6 +87,13 @@ function render(s: Status): void {
     setStatus("dot-desktop", "val-desktop", "warn", "not linked");
     relink.hidden = false;
   }
+
+  const ai = s.localAi;
+  if (!s.linked || !ai || !ai.enabled) {
+    $("dot-ai").className = "dot"; // neutral: it is optional
+    $("val-ai").textContent = "off";
+  } else if (!ai.reachable) setStatus("dot-ai", "val-ai", "warn", "unreachable");
+  else setStatus("dot-ai", "val-ai", "ok", `on (${ai.model})`);
 
   const hint = $("hint");
   if (!s.engine) {

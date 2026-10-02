@@ -3,8 +3,8 @@
 // vault persistence and counters.
 
 import { Engine, EngineError, type Finding, type MaskReport, type VaultJson } from "../shared/engine.ts";
-import { entryEncodedNeedles, entryEscapedNeedles, mergeVaults, type EncodedNeedle, type EscapedNeedle } from "../shared/vault.ts";
-import { wrap } from "../shared/placeholders.ts";
+import { entryEncodedNeedles, entryEscapedNeedles, mergeAddOnly, mergeVaults, type EncodedNeedle, type EscapedNeedle } from "../shared/vault.ts";
+import { canonicalKeys, wrap } from "../shared/placeholders.ts";
 import type { SiteId } from "../shared/sites.ts";
 
 export class EngineUnavailable extends Error {
@@ -19,9 +19,28 @@ export interface KeyValueStore {
   set(key: string, value: unknown): Promise<void>;
 }
 
+/** The app's local-AI status (policy op). */
+export interface LocalAiStatus {
+  enabled: boolean;
+  reachable: boolean;
+  model: string;
+  waitForPromptScan: boolean;
+}
+
+/** The app's answer to a deep scan: what it learned (add-only) and its vault as of now. */
+export interface DeepScanReply {
+  enabled: boolean;
+  added: Array<{ key: string; label: string }>;
+  vault: VaultJson | null;
+}
+
 /** The desktop app, reached through the native messaging host. */
 export interface AppLink {
   readonly linked: boolean;
+  /** Local-AI status as last read from the app; absent or null: no deep scan. */
+  readonly localAi?: LocalAiStatus | null;
+  /** Asks the app's local AI for a second look at already-masked text. Null: no answer. */
+  deepScan?(text: string, site: string, wait: boolean): Promise<DeepScanReply | null>;
   mask(text: string, site: string): Promise<{ text: string; report: MaskReport } | null>;
   fetchVault(): Promise<VaultJson | null>;
   event(e: { kind: "masked" | "blocked" | "upload"; site: string; count: number; keys: string[] }): void;
@@ -35,6 +54,8 @@ export interface MaskManyResult {
   keys: string[];
   newKeys: string[];
   via: "app" | "wasm";
+  /** Vault entries the local AI added while this call waited for it. */
+  aiAdded: number;
 }
 
 export type TripwireResult =
@@ -66,6 +87,7 @@ export class Brain {
   private escaped: EscapedNeedle[] = [];
   private encoded: EncodedNeedle[] = [];
   private values = new Set<string>();
+  private keySet = new Set<string>();
   private stats: Record<string, SiteStats> = {};
 
   private readonly store: KeyValueStore;
@@ -151,6 +173,7 @@ export class Brain {
     this.escaped = entries.flatMap(entryEscapedNeedles);
     this.encoded = entries.flatMap(entryEncodedNeedles);
     this.values = new Set(entries.map((e) => e.value));
+    this.keySet = new Set(entries.map((e) => e.key));
     this.needleRev = this.rev;
   }
 
@@ -186,7 +209,13 @@ export class Brain {
 
   async maskMany(
     texts: string[],
-    opts: { site: SiteId | string; mode: "full" | "known"; source?: string },
+    opts: {
+      site: SiteId | string;
+      mode: "full" | "known";
+      source?: string;
+      /** Called with N when the local AI's deep scan added N vault entries (also when it finishes later). */
+      onAiAdded?: (n: number) => void;
+    },
   ): Promise<MaskManyResult> {
     const e = this.need();
     const out: string[] = [];
@@ -194,6 +223,7 @@ export class Brain {
     let count = 0;
     let via: "app" | "wasm" = "wasm";
     let touchedVault = false;
+    let aiAdded = 0;
 
     for (const text of texts) {
       if (text === "") {
@@ -218,6 +248,11 @@ export class Brain {
           if (r.report.newKeys.length > 0) {
             const remote = await link.fetchVault().catch(() => null);
             if (remote) await this.adoptRemoteVault(remote);
+          } else if (r.text.includes("{{") && canonicalKeys(r.text).some((k) => !this.hasKey(k))) {
+            // Values the app already knew (e.g. learned by its local AI) are placeholders here
+            // that this vault has never seen: fetch them so they can be restored.
+            const remote = await link.fetchVault().catch(() => null);
+            if (remote) await this.adoptRemoteVault(remote);
           }
         }
       }
@@ -227,15 +262,73 @@ export class Brain {
         report = r.report;
         if (r.report.newKeys.length > 0) touchedVault = true;
       }
-      out.push(masked);
       count += report.count;
       report.newKeys.forEach((k) => newKeys.add(k));
+      const ai = await this.aiPass(masked, String(opts.site), opts);
+      masked = ai.text;
+      count += ai.count;
+      aiAdded += ai.added;
+      ai.newKeys.forEach((k) => newKeys.add(k));
+      out.push(masked);
     }
     if (touchedVault) await this.persistVault();
 
     const keys = new Set<string>();
     for (const t of out) if (t.includes("{{")) e.rehydrate(t).keys.forEach((k) => keys.add(k));
-    return { texts: out, count, keys: [...keys], newKeys: [...newKeys], via };
+    return { texts: out, count, keys: [...keys], newKeys: [...newKeys], via, aiAdded };
+  }
+
+  private hasKey(key: string): boolean {
+    this.refreshNeedles();
+    return this.keySet.has(key);
+  }
+
+  /**
+   * The desktop app's local-AI deep scan of text that is ALREADY masked (the deterministic
+   * pass above is never skipped or changed). It can only add vault entries: merging is
+   * add-only. For uploads, and when the app says prompts should wait, the request is held until
+   * the scan is back and the text is re-masked with what it learned; otherwise the scan runs in
+   * the background and later messages benefit. Any failure leaves the text exactly as it was.
+   */
+  private async aiPass(
+    masked: string,
+    site: string,
+    opts: { source?: string; onAiAdded?: (n: number) => void },
+  ): Promise<{ text: string; count: number; added: number; newKeys: string[] }> {
+    const none = { text: masked, count: 0, added: 0, newKeys: [] as string[] };
+    const link = this.link;
+    const ai = link?.localAi;
+    if (!link?.linked || !link.deepScan || !ai?.enabled || !ai.reachable || masked.trim().length < 6) return none;
+    const e = this.need();
+    const wait = opts.source === "file" || ai.waitForPromptScan;
+    const apply = async (r: DeepScanReply | null): Promise<string[]> => {
+      if (!r?.enabled || !r.vault || r.vault.entries.length === 0) return [];
+      const { vault, added } = mergeAddOnly(e.exportVault(), r.vault);
+      if (added.length === 0) return [];
+      e.loadVault(vault);
+      await this.persistVault();
+      return added.map((a) => a.key);
+    };
+    if (!wait) {
+      void link
+        .deepScan(masked, site, false)
+        .then(apply)
+        .then((keys) => {
+          if (keys.length > 0) opts.onAiAdded?.(keys.length);
+        })
+        .catch(() => undefined);
+      return none;
+    }
+    let keys: string[] = [];
+    try {
+      keys = await apply(await link.deepScan(masked, site, true));
+    } catch {
+      return none;
+    }
+    if (keys.length === 0) return none;
+    const again = e.maskKnown(masked);
+    opts.onAiAdded?.(keys.length);
+    return { text: again.text, count: again.count, added: keys.length, newKeys: keys };
   }
 
   /** What the composer chip shows: how many distinct items would be masked. Never returns values. */
