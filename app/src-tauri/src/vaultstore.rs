@@ -275,7 +275,7 @@ fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Vault, String> {
 }
 
 /// Writes `bytes` next to `target` and renames it into place.
-fn write_atomic(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = target.parent() {
         crate::platform::ensure_private_dir(dir)?;
     }
