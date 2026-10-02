@@ -177,7 +177,29 @@ pub fn record_permission(app: &AppHandle, payload: &Value, info: Option<&Value>,
 }
 
 /// Handles a browser-extension message (CONTRACTS.md §4) and returns the reply.
+/// `deepScan` and `policy` (which probes Ollama) are async; every other op is pure
+/// and runs on a blocking thread. Nothing here blocks other pipe traffic: each pipe
+/// connection has its own task.
 pub async fn handle_extension(app: &AppHandle, message: &Value) -> Value {
+    let msg = message.get("message").filter(|m| m.is_object()).unwrap_or(message);
+    match str_at(msg, "op") {
+        "deepScan" => {
+            let engine = app.state::<Engine>();
+            let r = deep_scan_op(&engine, msg).await;
+            if let Some(job) = r.job {
+                localai::spawn(app, job);
+            }
+            if let Some(learned) = &r.learned {
+                localai::announce_learned(app, learned, "browser", None);
+            }
+            return r.reply;
+        }
+        "policy" => {
+            let engine = app.state::<Engine>();
+            return policy_op(&engine).await;
+        }
+        _ => {}
+    }
     let app2 = app.clone();
     let message = message.clone();
     let out = tauri::async_runtime::spawn_blocking(move || extension(&app2.state::<Engine>(), &message))
@@ -185,6 +207,64 @@ pub async fn handle_extension(app: &AppHandle, message: &Value) -> Value {
         .unwrap_or_default();
     out.apply(app);
     out.stdout.unwrap_or_else(|| json!({ "ok": false, "error": "internal error" }))
+}
+
+/// What `deepScan` produced: the reply, and either a background job to start (wait=false)
+/// or what a waited scan learned (to announce in the feed).
+pub struct DeepScanReply {
+    pub reply: Value,
+    pub job: Option<AiJob>,
+    pub learned: Option<localai::Learned>,
+}
+
+/// `{"op":"deepScan","text":…,"site":…,"wait":bool}`: the extension's text, already
+/// masked there, gets the local AI's second look. Only ever ADDS vault entries (the
+/// extension merges them add-only too). `localai::learn` re-masks `text` with the
+/// app's vault before the model sees it, so nothing known leaks.
+pub async fn deep_scan_op(engine: &Engine, msg: &Value) -> DeepScanReply {
+    let cfg = engine.policy().local_ai.clone();
+    let text = str_at(msg, "text");
+    let wait = msg.get("wait").and_then(Value::as_bool).unwrap_or(false);
+    if !cfg.enabled || !(cfg.deep_scan_prompts || cfg.deep_scan_documents) || text.trim().is_empty() {
+        return DeepScanReply { reply: json!({ "ok": true, "enabled": false, "added": [] }), job: None, learned: None };
+    }
+    let vault_json = |e: &Engine| serde_json::from_str::<Value>(&e.with_vault(|v| v.to_json())).unwrap_or(Value::Null);
+    if !wait {
+        // Queue it and answer at once with what is already known.
+        return DeepScanReply {
+            reply: json!({ "ok": true, "enabled": true, "added": [], "queued": true, "vault": vault_json(engine) }),
+            job: Some(AiJob::Learn { text: text.to_string(), session_id: String::new() }),
+            learned: None,
+        };
+    }
+    let result = if text.chars().count() > zuko_core::localai::MAX_SCAN_CHARS {
+        Ok(localai::learn_document(engine, text).await.0)
+    } else {
+        localai::learn(engine, text, false).await
+    };
+    let learned = result.unwrap_or_default();
+    let vault = engine.vault_snapshot();
+    let added: Vec<Value> = learned
+        .new_keys
+        .iter()
+        .map(|k| json!({ "key": k, "label": vault.get(k).map(|e| e.label.clone()).unwrap_or_default() }))
+        .collect();
+    DeepScanReply {
+        reply: json!({ "ok": true, "enabled": true, "added": added, "vault": vault_json(engine) }),
+        job: None,
+        learned: Some(learned),
+    }
+}
+
+/// The `policy` reply: the detector settings plus the local AI's status, so the
+/// extension knows whether (and how) to ask for a deep scan.
+pub async fn policy_op(engine: &Engine) -> Value {
+    let cfg = engine.policy().local_ai.clone();
+    let mut local = json!({ "enabled": cfg.enabled, "reachable": false, "model": cfg.model.trim(), "waitForPromptScan": cfg.wait_for_prompt_scan });
+    if cfg.enabled {
+        local["reachable"] = Value::Bool(engine.localai().status(&cfg).await.reachable);
+    }
+    json!({ "ok": true, "detector": engine.policy().privacy.detector, "localAi": local })
 }
 
 /// Facts that cost I/O are only gathered for the events that use them.
@@ -793,6 +873,8 @@ pub fn extension(engine: &Engine, message: &Value) -> Outcome {
             json!({ "ok": true, "vault": serde_json::from_str::<Value>(&vault).unwrap_or(Value::Null) })
         }
         "policy" => json!({ "ok": true, "detector": engine.policy().privacy.detector }),
+        // The async ops are served by handle_extension; this keeps this fn total.
+        "deepScan" => json!({ "ok": true, "enabled": false, "added": [] }),
         "event" => {
             browser_event(engine, msg, &mut out);
             json!({ "ok": true })
@@ -1068,6 +1150,7 @@ mod tests {
     use super::*;
     use crate::engine::CtxBase;
     use std::sync::atomic::Ordering::Relaxed;
+    use std::time::Duration;
 
     const KEY: &str = "sk-proj-abcdefghijklmnopqrstuvwx1234";
     const CWD: &str = "C:\\Users\\a\\proj";
@@ -1410,6 +1493,85 @@ mod tests {
         let other = "sk-proj-zzzzzzzzzzzzzzzzzzzzzzzzzzzz9999";
         assert_eq!(redact(&format!("x {other} y"), &v, &det), "x [API_KEY] y");
         assert_eq!(clip("ééé", 3), "é…");
+    }
+
+    fn local_ai_engine(url: &str, wait: bool) -> Engine {
+        let mut p = Policy::default();
+        p.local_ai.enabled = true;
+        p.local_ai.endpoint = url.into();
+        p.local_ai.timeout_ms = 3000;
+        p.local_ai.wait_for_prompt_scan = wait;
+        Engine::with_parts(p, Vault::new(), engine().base().clone())
+    }
+
+    #[tokio::test]
+    async fn deep_scan_op_is_off_when_the_local_ai_is_off() {
+        let e = engine();
+        let r = deep_scan_op(&e, &json!({"op": "deepScan", "text": "Rahim Uddin", "site": "claude.ai", "wait": true})).await;
+        assert_eq!(r.reply, json!({"ok": true, "enabled": false, "added": []}));
+        assert!(r.job.is_none() && r.learned.is_none());
+        let p = policy_op(&e).await;
+        assert_eq!(p["localAi"]["enabled"], false);
+        assert_eq!(p["localAi"]["reachable"], false);
+        assert!(p["detector"]["secrets"].is_boolean());
+    }
+
+    #[tokio::test]
+    async fn deep_scan_op_waits_learns_and_only_adds() {
+        let m = crate::localai::mock::start(Default::default()).await;
+        let e = local_ai_engine(&m.url, true);
+        e.with_vault(|v| {
+            v.add_manual("hunter2-correct-horse", "PASSWORD", "Password", 1);
+        });
+        let msg = json!({"op": "deepScan", "site": "claude.ai", "wait": true,
+            "text": "Send it to Rahim Uddin, House 12, Road 5, Dhanmondi, Dhaka. pw {{PASSWORD_1}}"});
+        let r = deep_scan_op(&e, &msg).await;
+        assert_eq!(r.reply["enabled"], true);
+        let added = r.reply["added"].as_array().unwrap();
+        assert_eq!(added.len(), 2, "{}", r.reply);
+        assert_eq!(added[0]["key"], "NAME_1");
+        assert_eq!(added[0]["label"], "Person name");
+        // The reply's vault is the whole vault: the old entry is still there.
+        let v = Vault::from_json(&r.reply["vault"].to_string()).unwrap();
+        assert!(v.get("PASSWORD_1").is_some() && v.get("NAME_1").is_some() && v.get("ADDRESS_1").is_some());
+        assert_eq!(r.learned.unwrap().new_keys.len(), 2);
+        // Asking again adds nothing and removes nothing.
+        let again = deep_scan_op(&e, &msg).await;
+        assert_eq!(again.reply["added"], json!([]));
+        assert!(Vault::from_json(&again.reply["vault"].to_string()).unwrap().get("NAME_1").is_some());
+    }
+
+    #[tokio::test]
+    async fn deep_scan_op_without_wait_queues_and_answers_at_once() {
+        let m = crate::localai::mock::start(crate::localai::mock::Script { delay: Duration::from_secs(3), ..Default::default() }).await;
+        let e = local_ai_engine(&m.url, false);
+        let started = std::time::Instant::now();
+        let r = deep_scan_op(&e, &json!({"op": "deepScan", "text": "mail Rahim Uddin today", "wait": false})).await;
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert_eq!(r.reply["enabled"], true);
+        assert_eq!(r.reply["added"], json!([]));
+        assert!(matches!(&r.job, Some(AiJob::Learn { text, .. }) if text.contains("Rahim Uddin")));
+        assert_eq!(m.chat_bodies().len(), 0, "the scan itself runs in the queued job");
+    }
+
+    #[tokio::test]
+    async fn deep_scan_op_timeout_adds_nothing_and_policy_reports_status() {
+        let m = crate::localai::mock::start(crate::localai::mock::Script { delay: Duration::from_secs(5), ..Default::default() }).await;
+        let mut p = (*local_ai_engine(&m.url, true).policy()).clone();
+        p.local_ai.timeout_ms = 600;
+        let e = Engine::with_parts(p, Vault::new(), engine().base().clone());
+        let started = std::time::Instant::now();
+        let r = deep_scan_op(&e, &json!({"text": "mail Rahim Uddin today", "wait": true})).await;
+        assert!(started.elapsed() < Duration::from_millis(2500));
+        assert_eq!((r.reply["enabled"].clone(), r.reply["added"].clone()), (json!(true), json!([])));
+        assert!(e.vault_snapshot().is_empty());
+
+        let p = policy_op(&e).await;
+        assert_eq!(p["localAi"], json!({"enabled": true, "reachable": true, "model": "gemma3:4b", "waitForPromptScan": true}));
+        let dead = local_ai_engine("http://127.0.0.1:1", false);
+        let p = policy_op(&dead).await;
+        assert_eq!(p["localAi"]["reachable"], false);
+        assert_eq!(p["localAi"]["waitForPromptScan"], false);
     }
 
     fn with_local_ai(e: Engine) -> Engine {
