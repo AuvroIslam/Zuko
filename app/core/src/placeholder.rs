@@ -67,7 +67,10 @@ pub fn find_all(text: &str) -> Vec<(usize, usize, String)> {
     while let Some(off) = text[i..].find(OPEN) {
         let start = i + off;
         // Scan to the closing delimiter, bounded by MAX_LEN.
-        let limit = (start + MAX_LEN + 2).min(bytes.len());
+        let mut limit = (start + MAX_LEN + 2).min(bytes.len());
+        while !text.is_char_boundary(limit) {
+            limit -= 1;
+        }
         let mut matched = None;
         if let Some(rel) = text[start + 2..limit].find(CLOSE) {
             let inner = &text[start + 2..start + 2 + rel];
@@ -176,5 +179,13 @@ mod tests {
         assert_eq!(holdback_len("hello {"), 1);
         assert_eq!(holdback_len("hello {{API_KEY_1}} done"), 0);
         assert_eq!(holdback_len("é{{"), 2);
+    }
+
+    #[test]
+    fn find_all_never_splits_a_char() {
+        let t = format!("{{{{a{}", "é".repeat(30));
+        assert!(find_all(&t).is_empty());
+        let t = format!("{{{{API_KEY_1}}}} {{{{{}", "日本".repeat(20));
+        assert_eq!(find_all(&t).len(), 1);
     }
 }
