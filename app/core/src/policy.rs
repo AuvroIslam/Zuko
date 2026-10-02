@@ -576,70 +576,76 @@ fn norm_pattern(pattern: &str, ctx: &Ctx) -> String {
 }
 
 pub fn glob_match(pattern: &str, path: &str, ctx: &Ctx) -> bool {
-    let pat = norm_pattern(pattern, ctx);
+    let mut pat = norm_pattern(pattern, ctx);
     let path = if ctx.windows { path.to_lowercase() } else { path.to_string() };
 
-    // Trailing suffix handling: "/", "/**" match everything inside (and the dir itself).
-    let (base, suffix_any) = if let Some(b) = pat.strip_suffix("/**") {
-        (b.to_string(), true)
-    } else if let Some(b) = pat.strip_suffix('/') {
-        (b.to_string(), true)
-    } else {
-        (pat.clone(), false)
-    };
-
-    // A pattern without '/' matches a file name at any depth.
-    let base = if !base.contains('/') {
-        format!("**/{base}")
-    } else {
-        base
-    };
-
-    let mut re = String::from("^");
-    re.push_str(&glob_to_regex(&base));
-    if suffix_any {
-        re.push_str("(?:/.*)?");
+    // A trailing "/" means "everything inside"; normalize it to "/**".
+    if pat.ends_with('/') {
+        pat.push_str("**");
     }
-    re.push('$');
-    regex::Regex::new(&re).map(|r| r.is_match(&path)).unwrap_or(false)
+    // A pattern without '/' matches a file name at any depth.
+    if !pat.contains('/') {
+        pat = format!("**/{pat}");
+    }
+    let pat_segs: Vec<&str> = pat.split('/').filter(|s| !s.is_empty()).collect();
+    let path_segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    match_path(&pat_segs, &path_segs)
 }
 
-fn glob_to_regex(pat: &str) -> String {
-    let chars: Vec<char> = pat.chars().collect();
-    let n = chars.len();
-    let mut i = 0;
-    let mut out = String::new();
-    while i < n {
-        match chars[i] {
-            '*' => {
-                if i + 1 < n && chars[i + 1] == '*' {
-                    // globstar
-                    if i + 2 < n && chars[i + 2] == '/' {
-                        out.push_str("(?:.*/)?");
-                        i += 3;
-                    } else {
-                        out.push_str(".*");
-                        i += 2;
-                    }
-                } else {
-                    out.push_str("[^/]*");
-                    i += 1;
-                }
-            }
-            '?' => {
-                out.push_str("[^/]");
-                i += 1;
-            }
-            c => {
-                if ".+()|[]{}^$\\".contains(c) {
-                    out.push('\\');
-                }
-                out.push(c);
-                i += 1;
+/// Matches path segments; `**` spans zero or more segments.
+fn match_path(pat: &[&str], s: &[&str]) -> bool {
+    if pat.is_empty() {
+        return s.is_empty();
+    }
+    if pat[0] == "**" {
+        // Collapse consecutive "**".
+        let mut rest = &pat[1..];
+        while rest.first() == Some(&"**") {
+            rest = &rest[1..];
+        }
+        if rest.is_empty() {
+            return true;
+        }
+        for i in 0..=s.len() {
+            if match_path(rest, &s[i..]) {
+                return true;
             }
         }
+        return false;
     }
-    out
+    if s.is_empty() {
+        return false;
+    }
+    if !simple_wild(pat[0].as_bytes(), s[0].as_bytes()) {
+        return false;
+    }
+    match_path(&pat[1..], &s[1..])
+}
+
+/// Classic `*` (any run) / `?` (one char) matcher within a single string, no regex.
+fn simple_wild(pat: &[u8], s: &[u8]) -> bool {
+    let (mut p, mut i) = (0usize, 0usize);
+    let (mut star_p, mut star_i): (Option<usize>, usize) = (None, 0);
+    while i < s.len() {
+        if p < pat.len() && (pat[p] == b'?' || pat[p] == s[i]) {
+            p += 1;
+            i += 1;
+        } else if p < pat.len() && pat[p] == b'*' {
+            star_p = Some(p);
+            star_i = i;
+            p += 1;
+        } else if let Some(sp) = star_p {
+            p = sp + 1;
+            star_i += 1;
+            i = star_i;
+        } else {
+            return false;
+        }
+    }
+    while p < pat.len() && pat[p] == b'*' {
+        p += 1;
+    }
+    p == pat.len()
 }
 
 pub fn domain_match(pattern: &str, host: &str) -> bool {
@@ -655,30 +661,9 @@ pub fn domain_match(pattern: &str, host: &str) -> bool {
     host == pat || host.ends_with(&format!(".{pat}"))
 }
 
-/// Simple `*`/`?` glob match anchored over the whole string.
+/// Simple `*`/`?` glob match anchored over the whole string (`*` spans any character).
 fn wildcard_match(pattern: &str, s: &str) -> bool {
-    let mut re = String::from("^");
-    re.push_str(&glob_to_regex_loose(pattern));
-    re.push('$');
-    regex::Regex::new(&re).map(|r| r.is_match(s)).unwrap_or(false)
-}
-
-/// Like `glob_to_regex` but `*` spans any character (no slash boundary), for commands.
-fn glob_to_regex_loose(pat: &str) -> String {
-    let mut out = String::new();
-    for c in pat.chars() {
-        match c {
-            '*' => out.push_str(".*"),
-            '?' => out.push('.'),
-            c => {
-                if ".+()|[]{}^$\\".contains(c) {
-                    out.push('\\');
-                }
-                out.push(c);
-            }
-        }
-    }
-    out
+    simple_wild(pattern.as_bytes(), s.as_bytes())
 }
 
 fn ws_normalize(s: &str) -> String {
