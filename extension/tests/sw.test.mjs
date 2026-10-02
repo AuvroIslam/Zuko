@@ -2,148 +2,11 @@
 // port) with the REAL WASM engine, the real pdf.js and a real engine standing in for the app.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
-import { extractPdfText } from "../src/offscreen/pdf-text.ts";
-import { AWS, KEY, MAIL, realEngine, tick, wasmPath } from "./helpers.mjs";
+import { appEvents, appPort, localData, offscreen, page, popup, send, sessionData, setNative, toasts } from "./fake-chrome.mjs";
+import { AWS, KEY, MAIL, realEngine, tick } from "./helpers.mjs";
 import { makePdf } from "./pdf-fixtures.mjs";
-
-const EXT_ID = "zukotestextensionid";
-const wasmBytes = readFileSync(wasmPath());
-
-// ---- the fake browser -----------------------------------------------------------------------
-
-const sessionData = new Map();
-const localData = new Map();
-const messageListeners = [];
-const changeListeners = [];
-const toasts = [];
-const appEvents = [];
-let offscreenOpen = false;
-let nativeFactory = () => failingPort("Specified native messaging host not found.");
-
-function area(map, name) {
-  const pick = (keys) => (keys == null ? [...map.keys()] : Array.isArray(keys) ? keys : [keys]);
-  return {
-    async get(keys) {
-      return Object.fromEntries(pick(keys).filter((k) => map.has(k)).map((k) => [k, structuredClone(map.get(k))]));
-    },
-    async set(items) {
-      const changes = {};
-      for (const [k, v] of Object.entries(items)) {
-        changes[k] = { oldValue: map.get(k), newValue: structuredClone(v) };
-        map.set(k, structuredClone(v));
-      }
-      changeListeners.forEach((l) => l(changes, name));
-    },
-    async remove(keys) {
-      for (const k of pick(keys)) map.delete(k);
-    },
-  };
-}
-
-function failingPort(message) {
-  const disc = [];
-  let gone = false;
-  const port = {
-    name: "app.zuko.host",
-    postMessage() {
-      if (gone) throw new Error("Attempting to use a disconnected port object");
-    },
-    disconnect() {
-      gone = true;
-    },
-    onMessage: { addListener() {} },
-    onDisconnect: { addListener: (l) => disc.push(l) },
-  };
-  setTimeout(() => {
-    gone = true;
-    globalThis.chrome.runtime.lastError = { message };
-    disc.forEach((l) => l());
-    globalThis.chrome.runtime.lastError = undefined;
-  }, 0);
-  return port;
-}
-
-/** A port whose far end is `handler(message) -> reply | undefined`, like the native host + app. */
-function appPort(handler) {
-  const msg = [];
-  const disc = [];
-  let gone = false;
-  const port = {
-    name: "app.zuko.host",
-    postMessage(m) {
-      if (gone) throw new Error("Attempting to use a disconnected port object");
-      setTimeout(async () => {
-        const reply = await handler(m);
-        if (reply && !gone) msg.forEach((l) => l({ ...reply, id: m.id }));
-      }, 0);
-    },
-    disconnect() {
-      gone = true;
-    },
-    onMessage: { addListener: (l) => msg.push(l) },
-    onDisconnect: { addListener: (l) => disc.push(l) },
-    // test hooks
-    dropConnection() {
-      gone = true;
-      disc.forEach((l) => l());
-    },
-  };
-  return port;
-}
-
-globalThis.chrome = {
-  runtime: {
-    id: EXT_ID,
-    lastError: undefined,
-    getURL: (p) => `chrome-extension://${EXT_ID}/${p}`,
-    getManifest: () => ({ version: "9.9.9" }),
-    onMessage: { addListener: (l) => messageListeners.push(l) },
-    onInstalled: { addListener() {} },
-    onStartup: { addListener() {} },
-    connectNative: (name) => nativeFactory(name),
-    getContexts: async () => (offscreenOpen ? [{}] : []),
-    // The service worker only sends to the offscreen document: run the real extractor.
-    sendMessage: async (msg) => {
-      assert.equal(msg.target, "offscreen");
-      const bytes = new Uint8Array(Buffer.from(msg.base64, "base64"));
-      return extractPdfText(pdfjs, bytes);
-    },
-  },
-  storage: {
-    session: area(sessionData, "session"),
-    local: area(localData, "local"),
-    onChanged: { addListener: (l) => changeListeners.push(l) },
-  },
-  offscreen: {
-    createDocument: async () => {
-      offscreenOpen = true;
-    },
-  },
-  tabs: {
-    sendMessage: async (tabId, msg, opts) => {
-      toasts.push({ tabId, msg, opts });
-    },
-  },
-};
-
-const origFetch = globalThis.fetch;
-globalThis.fetch = async (url, ...rest) =>
-  String(url).endsWith("zuko_core.wasm") ? new Response(wasmBytes, { headers: { "content-type": "application/wasm" } }) : origFetch(url, ...rest);
-
-await import("../src/background/sw.ts");
-
-/** Sends a message the way chrome would and returns the reply. */
-function send(message, sender) {
-  return new Promise((resolve, reject) => {
-    const handled = messageListeners.some((l) => l(message, sender, resolve) === true);
-    if (!handled) reject(new Error("no listener took the message"));
-  });
-}
-const page = { id: EXT_ID, url: "https://chatgpt.com/c/abc", tab: { id: 7 }, frameId: 0 };
-const popup = { id: EXT_ID, url: `chrome-extension://${EXT_ID}/popup.html` };
+import { EXT_ID } from "./fake-chrome.mjs";
 
 // ---- tests (they share one service worker, so they run in order) -----------------------------
 
@@ -232,7 +95,7 @@ test("PDF upload: offscreen text extraction, masking, counters; a scanned PDF is
   assert.equal(ok.blocked, false);
   assert.equal(ok.markdown, "## Page 1\n\naws {{API_KEY_2}}\nother text\n");
   assert.equal(ok.count, 1);
-  assert.equal(offscreenOpen, true, "the offscreen document was created on demand");
+  assert.equal(offscreen.open, true, "the offscreen document was created on demand");
 
   const scanned = await send({ type: "sanitize-pdf", site: "chatgpt", name: "s.pdf", base64: b64([[]]) }, page);
   assert.equal(scanned.ok, true);
@@ -255,7 +118,7 @@ test("the desktop app: link, policy and vault sync, app-first masking, event rep
   const appPolicy = { customTerms: ["Project Falcon"] };
   let appDown = false;
   let port;
-  nativeFactory = () => {
+  setNative(() => {
     port = appPort(async (m) => {
       if (appDown) return { ok: false, error: "Zuko desktop app is not running" };
       switch (m.op) {
@@ -276,7 +139,7 @@ test("the desktop app: link, policy and vault sync, app-first masking, event rep
       return { ok: false, error: "unknown op" };
     });
     return port;
-  };
+  });
 
   const linked = await send({ type: "relink" }, popup);
   assert.equal(linked.linked, true);
@@ -318,7 +181,7 @@ test("the desktop app: link, policy and vault sync, app-first masking, event rep
 
 test("an app that answers 'not running' to hello is a clean 'not linked' and releases the port", async () => {
   let disconnected = false;
-  nativeFactory = () => {
+  setNative(() => {
     const p = appPort(async () => ({ ok: false, error: "Zuko desktop app is not running" }));
     const orig = p.disconnect;
     p.disconnect = () => {
@@ -326,7 +189,7 @@ test("an app that answers 'not running' to hello is a clean 'not linked' and rel
       orig();
     };
     return p;
-  };
+  });
   const r = await send({ type: "relink" }, popup);
   assert.equal(r.linked, false);
   assert.match(r.error, /not running/);
