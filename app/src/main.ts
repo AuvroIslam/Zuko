@@ -1,12 +1,11 @@
 // Entry point: boot the bridge, wire the island, start the greeting.
 
 import "./style.css";
-import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
+import { Bridge, IS_TAURI, mockModule, onEvent } from "./core/bridge";
 import { Sound } from "./core/sound";
-import { State, type Settings } from "./core/state";
+import { State } from "./core/state";
 import { Island } from "./island/island";
-import { registerHookHandlers } from "./island/hooks";
-import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
+import { registerHookHandlers, registerZukoHandlers, seedZukoState } from "./island/hooks";
 
 async function main() {
   const root = document.getElementById("root");
@@ -21,19 +20,19 @@ async function main() {
     State.settings = { ...State.settings, ...boot.settings };
   }
   island.applySettings();
-  State.loadIntegrationTasks();
+  State.loadSurfaces();
   if (boot && !boot.cursorPoll) island.followPageCursor();
 
-  await onEvent<{ x: number; y: number }>("cursor", ({ x, y }) => island.onCursor(x, y));
+  await onEvent("cursor", ({ x, y }) => island.onCursor(x, y));
 
-  /** Pause has to reach Rust too, or the pollers keep calling out. */
+  /** Pause has to reach Rust too, or the relay keeps waiting on the island. */
   const setPaused = (on: boolean) => {
     if (State.paused === on) return;
     State.paused = on;
     void Bridge.setPaused(on);
   };
 
-  await onEvent<string>("tray", (what) => {
+  await onEvent("tray", (what) => {
     switch (what) {
       case "settings":
         setPaused(false);
@@ -43,6 +42,10 @@ async function main() {
         setPaused(false);
         island.alert(State.defaultView());
         break;
+      case "activity":
+        setPaused(false);
+        island.alert("activity");
+        break;
       case "pause":
         setPaused(!State.paused);
         if (State.paused) island.fsm.forceHidden();
@@ -51,18 +54,27 @@ async function main() {
     }
   });
 
-  await onEvent<null>("screen-changed", () => void Bridge.reposition());
+  await onEvent("screen-changed", () => void Bridge.reposition());
 
   // The settings window writes preferences; apply them here without a restart.
-  await onEvent<Settings>("settings-changed", (s) => {
+  await onEvent("settings-changed", (s) => {
     State.settings = { ...State.settings, ...s };
     island.applySettings();
-    State.loadIntegrationTasks();
-    void refreshConfigured();
   });
 
   registerHookHandlers(island);
-  registerIntegrationHandlers(island);
+  registerZukoHandlers(island);
+  await seedZukoState();
+
+  // Dev only (`npx vite`, `?mock=1&scene=…`): jump straight to a scene.
+  const mock = mockModule();
+  if (mock) {
+    const scene = new URLSearchParams(window.location.search).get("scene");
+    if (scene) {
+      (await mock).playScene(scene, island);
+      return;
+    }
+  }
 
   island.launch();
 

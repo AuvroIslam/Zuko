@@ -1,31 +1,18 @@
-// Claude Code hook events → island state.
+// Claude Code hook events → island state, plus Zuko's own events (activity,
+// privacy, protection status).
 // Port of HookServer.processEvent / processPermissionRequest from the macOS app.
 // Difference from macOS: no terminal filter. On Windows the hook fires from any
 // terminal (Windows Terminal, VS Code, PowerShell…) and all of them are handled.
 
-import { Bridge, onEvent } from "../core/bridge";
+import { Bridge, onEvent, type HookEventPayload, type PrivacyEvent, type ZukoHookInfo } from "../core/bridge";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { BROWSER_ID, CLAUDE_ID, CLAUDE_NAME, GATEWAY_ID, POLICY_ID, State } from "../core/state";
 import type { Island } from "./island";
-
-const CLAUDE_ID = "integration_claude";
 
 /** Clears the approval card if no decision was made before the hook gave up. */
 let pendingTimeout: number | null = null;
-
-interface HookPayload {
-  hook_event_name?: string;
-  request_id?: string;
-  session_id?: string;
-  cwd?: string;
-  message?: string;
-  /** UserPromptSubmit carries `prompt`; `message` belongs to Notification/Stop. */
-  prompt?: string;
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  /** Optional agent tag: lowercase, digits and hyphens, ≤ 24 chars. */
-  zuko_agent?: string;
-}
+/** Clears the Policy pill's red badge a little after a block. */
+let policyBadgeTimer: number | null = null;
 
 /** Same rule as HookServer.validateAgent on macOS. "claude" is reserved. */
 function validateAgent(raw: string | undefined): string | null {
@@ -44,34 +31,28 @@ function agentColor(name: string): string {
   return FALLBACK_COLORS[Math.abs(h) % FALLBACK_COLORS.length];
 }
 
-const PROJECT_ALIASES: Record<string, string> = {};
-
-function aliasProjectName(name: string): string {
-  return PROJECT_ALIASES[name.toLowerCase()] ?? name;
-}
-
 function lastPathComponent(p: string): string {
   const cleaned = p.replace(/[\\/]+$/, "");
   const idx = Math.max(cleaned.lastIndexOf("\\"), cleaned.lastIndexOf("/"));
   return idx >= 0 ? cleaned.slice(idx + 1) : cleaned;
 }
 
-/** frenchStep() — same labels as the macOS app. */
+/** Ticker verbs per tool. */
 const TOOL_LABELS: Record<string, string> = {
-  Bash: "Exécute",
-  Read: "Lit",
-  Write: "Écrit",
-  Edit: "Modifie",
-  Glob: "Cherche",
-  Grep: "Recherche",
-  WebSearch: "Recherche web",
-  WebFetch: "Récupère",
-  TodoWrite: "Tâches",
+  Bash: "Runs",
+  Read: "Reads",
+  Write: "Writes",
+  Edit: "Edits",
+  Glob: "Finds",
+  Grep: "Searches",
+  WebSearch: "Web search",
+  WebFetch: "Fetches",
+  TodoWrite: "Tasks",
   Task: "Agent",
-  LS: "Liste",
-  MultiEdit: "Modifie",
+  LS: "Lists",
+  MultiEdit: "Edits",
   NotebookEdit: "Notebook",
-  PowerShell: "Exécute",
+  PowerShell: "Runs",
 };
 
 function stepLabel(tool: string, input: Record<string, unknown>): string {
@@ -83,9 +64,29 @@ function stepLabel(tool: string, input: Record<string, unknown>): string {
   if (path) return `${label} · ${lastPathComponent(path)}`;
   const file = str("file_path");
   if (file) return `${label} · ${lastPathComponent(file)}`;
+  const url = str("url");
+  if (url) return `${label} · ${url.replace(/^https?:\/\//, "").slice(0, 40)}`;
   const query = str("query");
   if (query) return `${label} · ${query.slice(0, 40)}`;
   return label;
+}
+
+/**
+ * The ticker line for a PreToolUse that carries Zuko's verdict: a block or a
+ * question leads with what Zuko did, everything else reads like Coucou.
+ */
+function zukoStepLabel(tool: string, input: Record<string, unknown>, z: ZukoHookInfo | undefined): string {
+  const plain = stepLabel(tool, input);
+  if (!z) return plain;
+  const headline = z.headline.trim();
+  switch (z.verdict) {
+    case "deny":
+      return `Blocked · ${headline || plain}`;
+    case "ask":
+      return `Asks · ${headline || plain}`;
+    default:
+      return z.rehydrated.length ? `${plain} · filled ${z.rehydrated.length}` : plain;
+  }
 }
 
 /**
@@ -117,26 +118,65 @@ function approvalTarget(tool: string, input: Record<string, unknown>): string {
 }
 
 function upsert(projectName: string, cwd: string) {
-  const t = State.tasks.find((x) => x.id === CLAUDE_ID);
+  const t = State.task(CLAUDE_ID);
   if (!t) return;
   t.name = projectName;
   if (cwd) t.sessionCwd = cwd;
 }
 
 function clearSession() {
-  const t = State.tasks.find((x) => x.id === CLAUDE_ID);
+  const t = State.task(CLAUDE_ID);
   if (!t) return;
   t.steps = [];
   t.stepIndex = 0;
-  t.name = "VS Code";
+  t.name = CLAUDE_NAME;
   t.pillBadge = null;
 }
 
-export function registerHookHandlers(island: Island) {
-  void onEvent<HookPayload>("hook", (payload) => handleHook(island, payload));
+/** A red badge on the Policy pill, gone again after a few seconds. */
+function flagPolicy() {
+  State.setPillBadge(POLICY_ID, "denied");
+  if (policyBadgeTimer != null) window.clearTimeout(policyBadgeTimer);
+  policyBadgeTimer = window.setTimeout(() => {
+    policyBadgeTimer = null;
+    if (State.task(POLICY_ID)?.pillBadge === "denied") State.setPillBadge(POLICY_ID, null);
+  }, 8000);
 }
 
-function handleHook(island: Island, payload: HookPayload) {
+export function registerHookHandlers(island: Island) {
+  void onEvent("hook", (payload) => handleHook(island, payload));
+}
+
+/** Zuko's own events: the activity feed, privacy notices and protection status. */
+export function registerZukoHandlers(island: Island) {
+  void onEvent("activity", (item) => State.pushActivity(item));
+  void onEvent("protection-changed", (status) => State.setProtection(status));
+  void onEvent("privacy", (event) => handlePrivacy(island, event));
+}
+
+/** Loads the status and the recent feed once at boot. */
+export async function seedZukoState() {
+  const [status, recent] = await Promise.all([
+    Bridge.protectionStatus(),
+    Bridge.activityRecent(200),
+  ]);
+  if (status) State.setProtection(status);
+  if (recent) State.seedActivity(recent);
+}
+
+function handlePrivacy(island: Island, event: PrivacyEvent) {
+  if (State.paused) return;
+  // Restores are routine and happen on every answer in gateway mode: badge only.
+  const pill = event.source === "browser" ? BROWSER_ID : event.source === "gateway" ? GATEWAY_ID : CLAUDE_ID;
+  if (event.direction === "rehydrated") return;
+  if (State.focusId !== pill) State.setPillBadge(pill, "masked");
+  State.privacyNotice = event;
+  Sound.play(event.direction === "blocked_prompt" ? "error" : "blip");
+  island.showPrivacy();
+  State.notify();
+}
+
+function handleHook(island: Island, payload: HookEventPayload) {
   if (State.paused) {
     // Silence here used to cost Claude Code nearly two minutes: the relay waited
     // for a decision from an island that had already decided not to look. Say so,
@@ -147,8 +187,7 @@ function handleHook(island: Island, payload: HookPayload) {
 
   const name = payload.hook_event_name ?? "";
   const cwd = payload.cwd ?? "";
-  const raw = lastPathComponent(cwd);
-  const projectName = aliasProjectName(raw || "Session");
+  const projectName = lastPathComponent(cwd) || "Session";
 
   // Route to the right pill. Valid zuko_agent → dynamic "agent_<name>" pill.
   // "claude" is reserved; absent or invalid → Claude Code pill unchanged.
@@ -197,9 +236,22 @@ function handleHook(island: Island, payload: HookPayload) {
 
     case "PreToolUse": {
       ensurePill();
-      State.updateTask(agentId, "working");
       const tool = payload.tool_name ?? "Tool";
-      State.appendStep(agentId, stepLabel(tool, payload.tool_input ?? {}));
+      const z = payload.zuko;
+      State.appendStep(agentId, zukoStepLabel(tool, payload.tool_input ?? {}, z));
+      if (z?.verdict === "deny") {
+        // Zuko said no: the agent reads the reason and adapts; the human gets a
+        // red badge on the pill and on Policy, not an alert.
+        State.updateTask(agentId, "error");
+        if (!focused) State.setPillBadge(agentId, "denied");
+        flagPolicy();
+        Sound.play("error");
+        window.setTimeout(() => {
+          if (State.task(agentId)?.state === "error") State.updateTask(agentId, "working");
+        }, 1600);
+      } else {
+        State.updateTask(agentId, "working");
+      }
       surface("overview", false);
       break;
     }
@@ -210,13 +262,13 @@ function handleHook(island: Island, payload: HookPayload) {
 
     case "PostToolUseFailure":
       State.updateTask(agentId, "working");
-      State.appendStep(agentId, "⚠ failed");
+      State.appendStep(agentId, "Failed");
       break;
 
     case "Notification": {
       const message = payload.message ?? "";
       const lower = message.toLowerCase();
-      if (lower.includes("rate limit") || lower.includes("limite d")) {
+      if (lower.includes("rate limit") || lower.includes("usage limit") || lower.includes("limit reached")) {
         State.updateTask(agentId, "ratelimit");
         Sound.play("rate");
       } else if (message.endsWith("?")) {
@@ -263,13 +315,13 @@ function handleHook(island: Island, payload: HookPayload) {
       break;
 
     case "SubagentStop":
-      State.appendStep(agentId, "• subagent done");
+      State.appendStep(agentId, "Subagent done");
       break;
 
     case "PermissionRequest": {
       // External agents do not get an approval card — showing one would look like
       // a Claude Code request. Decline immediately so the agent re-asks in its
-      // terminal. Approval support for other agents will come with Codex support.
+      // terminal.
       if (isExternalAgent) {
         if (payload.request_id) void Bridge.approvalDecline(payload.request_id);
         break;
@@ -292,6 +344,8 @@ function handleHook(island: Island, payload: HookPayload) {
         sessionId: payload.session_id ?? "",
         tool,
         command: approvalTarget(tool, input),
+        zuko: payload.zuko ?? null,
+        receivedAt: performance.now(),
       };
       // The relay's short ack window closes in 800 ms; everything below this
       // line is synchronous, so the card really is up by the time it lands.
@@ -299,15 +353,11 @@ function handleHook(island: Island, payload: HookPayload) {
       State.updateTask(CLAUDE_ID, "approval");
       State.isPinned = true;
       Sound.play("approval");
-      if (focused) {
-        island.alert("approval");
-      } else {
-        // Another agent holds the view, so the card would yank it away. The badge
-        // is the signal instead — but it has to be on screen for that to mean
-        // anything, hence the reveal. We just told the relay a human can act.
-        State.setPillBadge(CLAUDE_ID, "approval");
-        island.reveal();
-      }
+      // A risk card always takes the island: the other pills are Zuko's own
+      // surfaces, so there is no other session's view to protect.
+      State.focusId = CLAUDE_ID;
+      State.setPillBadge(CLAUDE_ID, null);
+      island.alert("approval");
       // Zuko answers within 108 s or not at all; after that the terminal has
       // taken over and the card would be lying.
       pendingTimeout = window.setTimeout(() => {

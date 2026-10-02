@@ -5,13 +5,15 @@ import { Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI, onDragDrop } from "../core/bridge";
 import {
   EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W,
-  ROUNDED_CORNER, VIEW_LAYOUTS, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
+  ROUNDED_CORNER, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
   islandSize,
   type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
-import { BotEngine, hexToRGB } from "../character/engine";
+import { CLAUDE_ID, RubberStampGuard, State } from "../core/state";
+import { BotEngine } from "../character/engine";
+import { approvalLines } from "../views/approval";
+import { plural } from "../views/format";
 import { Greeting } from "../character/greeting";
 import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../character/minibots";
 import { UploadCanvas } from "../upload/canvas";
@@ -110,41 +112,30 @@ export class Island {
       setFocus: (id) => {
         State.setFocus(id);
         Sound.play("blip");
+        // The Claude pill is the way back to a card that is still waiting.
+        if (id === CLAUDE_ID && State.pendingApproval) this.setView("approval");
       },
       openTerminal: () => {
         const cwd = State.focusTask?.sessionCwd ?? null;
         void Bridge.openInVSCode(cwd);
       },
-      // The ↗ button — same targets as openAgentTarget() on macOS.
+      // The ↗ button: the session folder for Claude Code and agents, the
+      // settings window for Zuko's own surfaces.
       openTarget: () => {
         const task = State.focusTask;
         if (!task) return;
-        const urls: Record<string, string> = {
-          integration_resend: "https://resend.com/emails",
-          integration_vercel: "https://vercel.com/dashboard",
-          integration_github: "https://github.com",
-          integration_stripe: "https://dashboard.stripe.com/payments",
-          integration_notion: "https://notion.so",
-          integration_calcom: "https://app.cal.com/bookings",
-        };
-        if (task.id === "integration_claude") void Bridge.openInVSCode(task.sessionCwd ?? null);
-        else if (task.id === "integration_n8n") void Bridge.openN8n();
-        else if (urls[task.id]) void Bridge.openUrl(urls[task.id]);
+        if (task.id === CLAUDE_ID || !task.isSurface) void Bridge.openInVSCode(task.sessionCwd ?? null);
+        else void Bridge.openSettingsWindow();
       },
       openUrl: (url) => {
         if (url) void Bridge.openUrl(url);
       },
-      decide: (d) => {
-        const req = State.pendingApproval;
-        void Bridge.log(`decide ${d} req=${req?.requestId ?? "none"}`);
-        if (!req) return;
-        Sound.play(d === "deny" ? "blip" : "approve");
-        void Bridge.approvalDecision(req.requestId, d);
-        State.pendingApproval = null;
+      decide: (d, elapsedMs) => this.decide(d, elapsedMs),
+      keepAlive: () => this.ensureRunning(),
+      dismissPrivacy: () => {
+        State.privacyNotice = null;
+        this.dropPin();
         State.isPinned = false;
-        this.fsm.pinned = false;
-        State.updateTask("integration_claude", "working");
-        State.setPillBadge("integration_claude", null);
         this.setView(State.defaultView());
       },
       toggleSound: () => {
@@ -307,8 +298,9 @@ export class Island {
       State.notify();
       return;
     }
-    const grew = VIEW_LAYOUTS[view].height >= VIEW_LAYOUTS[State.view].height;
+    const before = this.targetSize().h;
     State.view = view;
+    const grew = this.targetSize().h >= before;
     State.lastActivity = performance.now();
     this.animateGeometry(!grew);
     State.notify();
@@ -337,6 +329,50 @@ export class Island {
   /** An alert stopped waiting for an answer: let the island auto-close again. */
   dropPin() {
     this.fsm.pinned = false;
+  }
+
+  /**
+   * The user's answer to the approval card. Feeds the rubber-stamp guard: when
+   * this answer completes a streak of fast risky approvals, a gentle note says
+   * the next one will need a hold.
+   */
+  decide(d: "allow" | "deny", elapsedMs: number) {
+    const req = State.pendingApproval;
+    void Bridge.log(`decide ${d} req=${req?.requestId ?? "none"} elapsed=${Math.round(elapsedMs)}ms`);
+    if (!req) return;
+    Sound.play(d === "deny" ? "blip" : "approve");
+    void Bridge.approvalDecision(req.requestId, d, elapsedMs);
+    const armed = State.rubberStamp.record(req.zuko?.tier ?? null, d, elapsedMs);
+    State.pendingApproval = null;
+    State.isPinned = false;
+    this.fsm.pinned = false;
+    State.updateTask(CLAUDE_ID, "working");
+    State.setPillBadge(CLAUDE_ID, null);
+    if (armed) {
+      const n = RubberStampGuard.STREAK;
+      State.noteMessage =
+        `That was ${plural(n, "risky approval")} in under a second each. Take a breath — the next one needs a short hold.`;
+      this.setView("note");
+      window.setTimeout(() => {
+        if (State.view === "note") this.setView(State.defaultView());
+      }, 4200);
+      return;
+    }
+    // A privacy notice that arrived behind the card gets its turn now.
+    if (State.privacyNotice) {
+      this.setView("privacy");
+      return;
+    }
+    this.setView(State.defaultView());
+  }
+
+  /** Shows the privacy notice, unless an approval card holds the island. */
+  showPrivacy() {
+    if (State.pendingApproval) return;
+    const blocked = State.privacyNotice?.direction === "blocked_prompt";
+    // A blocked prompt waits for its Copy click; a masking notice closes itself.
+    State.isPinned = blocked;
+    this.alert("privacy");
   }
 
   // ── File drop ───────────────────────────────────────────────────────────────
@@ -450,7 +486,10 @@ export class Island {
   // ── Geometry ────────────────────────────────────────────────────────────────
 
   private targetSize(): { w: number; h: number; r: number } {
-    const { w, h } = islandSize(State.mode, State.view, State.chatHistory.length);
+    const { w, h } = islandSize(State.mode, State.view, {
+      chatCount: State.chatHistory.length,
+      approvalLines: approvalLines(State.pendingApproval, State.rubberStamp),
+    });
     const r = State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER;
     return { w, h, r };
   }
@@ -717,7 +756,9 @@ export class Island {
     this.viewsEl.classList.toggle("hidden-by-upload", uploadActive);
 
     tickMiniBots(dt);
-    this.views.get(State.view)?.tick?.(nowMs);
+    const activeView = this.views.get(State.view);
+    activeView?.tick?.(nowMs);
+    const viewAnimating = State.mode === "expanded" && !!activeView?.animating?.();
     if (UploadSeq.isActive) this.stepSequence();
     this.updateCountdown(nowMs);
 
@@ -733,7 +774,7 @@ export class Island {
       ? settling
       : settling ||
         !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
-        greetingActive || this.engine.busy || UploadSeq.isActive;
+        greetingActive || this.engine.busy || UploadSeq.isActive || viewAnimating;
 
     if (busy) {
       requestAnimationFrame(this.frame);
@@ -787,8 +828,8 @@ export class Island {
     const ctx = this.botCanvas.getContext("2d");
     if (!ctx) return;
 
-    const focus = State.focusTask;
-    this.engine.bodyColor = focus?.isIntegration ? hexToRGB(focus.color) : null;
+    // The island's own bot is always Zuko; only the pill minibots wear a colour.
+    this.engine.bodyColor = null;
     this.engine.particleOverhang = BOT_OVERHANG;
     this.engine.lookX = this.lookX();
     this.engine.lookY = this.lookY();
