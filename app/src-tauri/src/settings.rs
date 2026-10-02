@@ -1,4 +1,4 @@
-// Preferences, stored as plain JSON in settings.json under platform::config_dir().
+// Preferences, stored as plain JSON in settings.json under config_dir() below.
 // No secret ever lands here — API keys live in the OS keychain (see secrets.rs).
 
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,51 @@ impl Default for Settings {
     }
 }
 
-pub use crate::platform::{config_dir, local_dir};
+/// Where settings.json and policy.json live: %APPDATA%\Zuko (platform default), or
+/// `ZUKO_CONFIG_DIR` when set. The override exists for development and tests, which
+/// must never touch the user's real Zuko data. The relay always reads the platform
+/// default, so its stateless fallback ignores an overridden policy.
+pub fn config_dir() -> PathBuf {
+    #[cfg(test)]
+    return test_root().join("config");
+    #[cfg(not(test))]
+    dir_override("ZUKO_CONFIG_DIR").unwrap_or_else(crate::platform::config_dir)
+}
+
+/// Where the vault, the audit log, the inbox and the relay live: %LOCALAPPDATA%\Zuko
+/// (platform default), or `ZUKO_DATA_DIR` when set (development and tests).
+pub fn local_dir() -> PathBuf {
+    #[cfg(test)]
+    return test_root().join("local");
+    #[cfg(not(test))]
+    dir_override("ZUKO_DATA_DIR").unwrap_or_else(crate::platform::local_dir)
+}
+
+/// True when either directory is redirected (development and tests). Secrets then live
+/// under a separate keyring service (secrets.rs), so a development run can never read or
+/// replace the vault key of the real installation.
+pub fn dirs_overridden() -> bool {
+    #[cfg(test)]
+    return true;
+    #[cfg(not(test))]
+    return dir_override("ZUKO_CONFIG_DIR").is_some() || dir_override("ZUKO_DATA_DIR").is_some();
+}
+
+/// An absolute directory from `var`; relative or empty values are ignored so a
+/// stray variable can never scatter Zuko's data into the current directory.
+#[cfg(not(test))]
+fn dir_override(var: &str) -> Option<PathBuf> {
+    let value = std::env::var_os(var)?;
+    let path = PathBuf::from(value);
+    path.is_absolute().then_some(path)
+}
+
+/// Unit tests never see the real data directories, whatever the environment says:
+/// every path above resolves into a per-process temp folder instead.
+#[cfg(test)]
+pub fn test_root() -> PathBuf {
+    std::env::temp_dir().join(format!("zuko-test-data-{}", std::process::id()))
+}
 
 pub fn hook_exe_path() -> PathBuf {
     local_dir().join("bin").join(crate::platform::HOOK_EXE)
@@ -58,9 +102,7 @@ pub fn load() -> Settings {
 }
 
 pub fn save(settings: &Settings) -> std::io::Result<()> {
-    let dir = config_dir();
-    crate::platform::ensure_private_dir(&dir)?;
     let json = serde_json::to_vec_pretty(settings)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(settings_path(), json)
+    crate::files::write_atomic(&settings_path(), &json)
 }

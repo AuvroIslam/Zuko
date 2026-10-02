@@ -1,8 +1,14 @@
 // Events pushed to the UI (see CONTRACTS.md §3). Every window listens, so the
-// settings window's activity list and the island's feed stay in step.
+// settings window's activity list and the island's feed stay in step: `activity`,
+// `privacy` and `protection-changed` go out with `AppHandle::emit`, which reaches every
+// window (never `emit_to` a single label).
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+use zuko_core::audit::Receipt;
+use zuko_core::mask::{self, MaskCtx};
+
+use crate::engine::{self, Engine};
 
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,4 +75,89 @@ pub fn privacy(app: &AppHandle, event: &PrivacyEvent) {
 pub fn protection_changed(app: &AppHandle) {
     let status = crate::commands::status_snapshot(app);
     let _ = app.emit("protection-changed", status);
+}
+
+/// A masking or restoring done by one of the app's own features (documents, chat,
+/// clipboard, the manual mask box), as the UI, the audit log and the counters see it.
+pub struct PrivacyNote<'a> {
+    /// `PrivacyEvent::source`: chat | file | clipboard | ...
+    pub source: &'a str,
+    /// `ActivityItem::event`: "File", "Chat", "Clipboard", ...
+    pub event: &'a str,
+    pub tool: &'a str,
+    /// Human summary. It is masked again here, so a file name or title that happens to
+    /// contain a value can never reach the feed or the log.
+    pub summary: String,
+    /// `masked` or `rehydrated`.
+    pub direction: &'a str,
+    pub count: usize,
+    pub keys: Vec<String>,
+    pub new_keys: Vec<String>,
+    pub session_id: Option<String>,
+}
+
+/// Emits the `privacy` toast, adds an activity item and an audit receipt, counts the
+/// masked values and refreshes the protection status (the vault size changed).
+pub fn announce_privacy(app: &AppHandle, engine: &Engine, note: PrivacyNote) {
+    let det = engine.detector();
+    let ctx = MaskCtx { source: note.source.to_string(), now: engine::now() };
+    let (summary, labels, learned) = engine.with_vault(|vault| {
+        let (summary, report) = mask::mask_text(&det, vault, &note.summary, &ctx);
+        let labels: Vec<String> = note
+            .keys
+            .iter()
+            .map(|k| vault.get(k).map(|e| e.label.clone()).unwrap_or_default())
+            .collect();
+        (summary, labels, report.count > 0)
+    });
+    if learned {
+        // The summary itself held a value (a file name, a window title): it is in the vault now.
+        engine.persist_vault();
+    }
+    if note.direction == "masked" {
+        engine::Stats::add(&engine.stats.masked, note.count as u64);
+    }
+    privacy(
+        app,
+        &PrivacyEvent {
+            source: note.source.to_string(),
+            direction: note.direction.to_string(),
+            count: note.count,
+            keys: note.keys.clone(),
+            labels,
+            new_keys: note.new_keys.clone(),
+            session_id: note.session_id.clone(),
+            masked_prompt: None,
+        },
+    );
+    let session_id = note.session_id.clone().unwrap_or_default();
+    crate::auditlog::append(Receipt {
+        ts: engine::now(),
+        session_id: session_id.clone(),
+        event: note.event.to_string(),
+        tool: note.tool.to_string(),
+        summary: summary.clone(),
+        verdict: note.direction.to_string(),
+        tier: "low".into(),
+        keys: note.keys.clone(),
+        policy_digest: engine.policy().digest(),
+        ..Default::default()
+    });
+    activity(
+        app,
+        &ActivityItem {
+            id: next_id(),
+            ts: engine::now_ms(),
+            session_id,
+            event: note.event.to_string(),
+            tool: note.tool.to_string(),
+            headline: summary.clone(),
+            summary,
+            verdict: note.direction.to_string(),
+            tier: "low".into(),
+            keys: note.keys,
+            ..Default::default()
+        },
+    );
+    protection_changed(app);
 }

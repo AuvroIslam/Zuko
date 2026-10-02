@@ -1,4 +1,8 @@
 // Zuko for Windows — app wiring and the commands the island calls.
+//
+// Plugins: single-instance, autostart, clipboard-manager and global-shortcut. The last
+// two are used from Rust only (the clipboard hotkeys in commands.rs), so no capability
+// grants the webview direct access to the clipboard or to shortcut registration.
 
 mod auditlog;
 mod claude;
@@ -29,6 +33,8 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
 use claude::{Chat, ChatContext, ChatReply};
+use engine::Engine;
+use events::PrivacyNote;
 use files::DroppedFile;
 use hooks::{HookPreview, HookStatus};
 use island::{PollGate, ScreenInfo};
@@ -216,6 +222,7 @@ fn hooks_apply(
         current.clone()
     };
     let _ = app.emit("settings-changed", updated);
+    events::protection_changed(&app);
     Ok(backup)
 }
 
@@ -244,13 +251,37 @@ fn approval_decline(app: AppHandle, request_id: String) {
 /// One chat turn. The API key and any file bytes stay on the Rust side.
 #[tauri::command]
 async fn chat_send(
+    app: AppHandle,
     shared: State<'_, Shared>,
     chat: State<'_, Chat>,
+    engine: State<'_, Engine>,
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
     let model = shared.settings.lock().unwrap().model.clone();
-    claude::send(&chat, &model, query, context).await
+    let reply = claude::send(&engine, &chat, &model, query, context).await?;
+    // Tell the user what was masked before the message left (keys only).
+    if reply.report.count > 0 {
+        events::announce_privacy(
+            &app,
+            &engine,
+            PrivacyNote {
+                source: "chat",
+                event: "Chat",
+                tool: "message",
+                summary: format!(
+                    "Masked {} before sending to Claude",
+                    if reply.report.count == 1 { "1 value".to_string() } else { format!("{} values", reply.report.count) }
+                ),
+                direction: "masked",
+                count: reply.report.count,
+                keys: reply.report.keys.clone(),
+                new_keys: reply.report.new_keys.clone(),
+                session_id: None,
+            },
+        );
+    }
+    Ok(reply)
 }
 
 #[tauri::command]
@@ -264,19 +295,26 @@ fn ingest_file(path: String) -> Result<DroppedFile, String> {
     files::ingest(&path)
 }
 
-/// The island may only ask whether a key exists — never read it.
+/// The island may only ask whether a key exists — never read it. The vault key is
+/// not reachable from here at all (see `secrets::ui_may_touch`).
 #[tauri::command]
 fn secret_present(key: String) -> bool {
-    secrets::present(&key)
+    secrets::ui_may_touch(&key) && secrets::present(&key)
 }
 
 #[tauri::command]
 fn secret_set(key: String, value: String) -> Result<(), String> {
+    if !secrets::ui_may_touch(&key) {
+        return Err(format!("unknown key {key}"));
+    }
     secrets::set(&key, &value)
 }
 
 #[tauri::command]
 fn secret_clear(key: String) -> Result<(), String> {
+    if !secrets::ui_may_touch(&key) {
+        return Err(format!("unknown key {key}"));
+    }
     secrets::clear(&key)
 }
 
@@ -345,6 +383,23 @@ pub fn show_settings_window(app: &AppHandle) {
     let _ = win.unminimize();
     let _ = win.show();
     let _ = win.set_focus();
+    allow_file_drops(app);
+}
+
+/// The Documents drop zone needs dropped files to reach Tauri's drag events (the window
+/// keeps the default `drag_drop` handler; only WebView2's own drop target can get in
+/// the way, see `platform::unblock_webview_drops`). WebView2 registers that target a
+/// moment after the window first shows, so the fix is applied now and again shortly
+/// after; it is idempotent.
+fn allow_file_drops(app: &AppHandle) {
+    let now = app.clone();
+    let _ = app.run_on_main_thread(move || platform::unblock_webview_drops(&now));
+    let later = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        let handle = later.clone();
+        let _ = later.run_on_main_thread(move || platform::unblock_webview_drops(&handle));
+    });
 }
 
 #[tauri::command]
@@ -368,13 +423,15 @@ pub fn run() {
             let _ = app.emit_to(island::WINDOW_LABEL, "tray", "open".to_string());
         }))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Shared {
             settings: Mutex::new(loaded.clone()),
             gate: gate.clone(),
         })
         .manage(Pending::default())
         .manage(Chat::default())
-        .manage(engine::Engine::load())
+        .manage(Engine::load())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
@@ -442,11 +499,20 @@ pub fn run() {
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
             log::line(format!("--- Zuko {} started ---", env!("CARGO_PKG_VERSION")));
+            // Resume the audit chain and seed the activity feed before the first event.
+            auditlog::init();
+            commands::register_hotkeys(&handle);
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             gateway::start(handle.clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Zuko");
+        .build(tauri::generate_context!())
+        .expect("error while building Zuko")
+        .run(|app, event| {
+            // A vault change still waiting out its debounce must not be lost on exit.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Engine>().flush_vault();
+            }
+        });
 }
