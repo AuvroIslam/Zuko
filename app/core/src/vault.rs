@@ -90,10 +90,11 @@ struct Lookup {
 
 #[derive(Debug)]
 struct Matcher {
-    /// Patterns: each value, plus its JSON-escaped forms when different.
+    /// Patterns: every raw value first, then JSON-escaped forms that are not themselves
+    /// a stored raw value.
     ac: Option<AhoCorasick>,
-    /// Pattern index → entry index.
-    pattern_entry: Vec<usize>,
+    /// Pattern index → (entry index, is an escaped form).
+    pattern_entry: Vec<(usize, bool)>,
 }
 
 /// One exact occurrence of a stored value inside a text.
@@ -196,9 +197,16 @@ impl Vault {
                 let mut patterns = Vec::new();
                 let mut pattern_entry = Vec::new();
                 for (i, e) in self.entries.iter().enumerate() {
-                    for f in value_forms(&e.value) {
-                        patterns.push(f);
-                        pattern_entry.push(i);
+                    patterns.push(e.value.clone());
+                    pattern_entry.push((i, false));
+                }
+                let raw: std::collections::HashSet<&str> = self.entries.iter().map(|e| e.value.as_str()).collect();
+                for (i, e) in self.entries.iter().enumerate() {
+                    for f in value_forms(&e.value).into_iter().skip(1) {
+                        if !raw.contains(f.as_str()) {
+                            patterns.push(f);
+                            pattern_entry.push((i, true));
+                        }
                     }
                 }
                 let ac = if patterns.is_empty() {
@@ -330,15 +338,37 @@ impl Vault {
     /// contain `"`, `\` or control chars, and the `\uXXXX`-escaped form of non-ASCII
     /// values. Offsets are char boundaries.
     pub fn find_values(&self, text: &str) -> Vec<ValueMatch> {
+        self.find_value_forms(text).into_iter().map(|(m, _)| m).collect()
+    }
+
+    /// [`Vault::find_values`], also telling whether each match is an escaped form of
+    /// the entry's value (`true`) rather than the raw value itself (`false`).
+    pub fn find_value_forms(&self, text: &str) -> Vec<(ValueMatch, bool)> {
         let t = self.matcher();
         let Some(ac) = &t.ac else { return Vec::new() };
         ac.find_iter(text)
-            .map(|m| ValueMatch {
-                start: m.start(),
-                end: m.end(),
-                key: self.entries[t.pattern_entry[m.pattern().as_usize()]].key.clone(),
+            .map(|m| {
+                let (i, escaped) = t.pattern_entry[m.pattern().as_usize()];
+                (ValueMatch { start: m.start(), end: m.end(), key: self.entries[i].key.clone() }, escaped)
             })
             .collect()
+    }
+
+    /// Interns `escaped`, an escaped occurrence of the value stored under `key`, as its
+    /// own entry (same kind, label, category and hint), so that rehydration writes back
+    /// exactly the escaped text. Returns the new (or existing) key.
+    pub fn intern_escaped_form(&mut self, key: &str, escaped: &str, source: &str, now: u64) -> Option<String> {
+        let e = self.get(key)?.clone();
+        self.insert(escaped, &e.kind, &e.label, e.category, e.hint.clone(), source, now)
+    }
+
+    /// Counts one more masking of `key` (an exact-value replacement) at `now`.
+    pub fn note_masked(&mut self, key: &str, now: u64) {
+        if let Some(&i) = self.lookup().by_key.get(key) {
+            let e = &mut self.entries[i];
+            e.hits += 1;
+            e.last_used = now;
+        }
     }
 
     /// Merges entries from `other` (e.g. the browser extension's session vault). Values

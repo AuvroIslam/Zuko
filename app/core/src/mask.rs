@@ -16,10 +16,10 @@
 //! Guarantees (tested): masking is idempotent (`mask(mask(x)) == mask(x)`), existing
 //! placeholders are never altered (a vault value is never replaced *inside* a
 //! placeholder), offsets are always char boundaries (any UTF-8 text), and
-//! `rehydrate(mask_known(rehydrate(t))) == rehydrate(t)`. A value found in its
-//! JSON-escaped form (`pa\"ss` inside a JSON text) is masked too; rehydration always
-//! writes the raw value, so JSON contexts must be rehydrated at the value level
-//! ([`rehydrate_json`]), never on serialized JSON text.
+//! `rehydrate(mask_text(t)) == t`. A value found in its JSON-escaped form (`pa\"ss`
+//! inside a JSON text, or `\u00e9` escapes) is masked too, under its own key (same
+//! kind and hint), so the round trip stays exact; [`mask_known`] matches raw values only.
+//! Rehydrate JSON at the value level ([`rehydrate_json`], [`rehydrate_json_text`]).
 
 use crate::detect::Detector;
 use crate::placeholder;
@@ -120,16 +120,17 @@ fn overlaps(sorted: &[(usize, usize)], s: usize, e: usize) -> bool {
     idx > 0 && sorted[idx - 1].1 > s
 }
 
-/// Exact vault matches that do not touch an existing placeholder.
-fn value_spans(vault: &Vault, text: &str, protected: &[(usize, usize)]) -> Vec<(usize, usize, String)> {
+/// Exact vault matches that do not touch an existing placeholder, with a flag telling
+/// whether the match is an escaped form of the stored value.
+fn value_spans(vault: &Vault, text: &str, protected: &[(usize, usize)]) -> Vec<(usize, usize, String, bool)> {
     if vault.is_empty() {
         return Vec::new();
     }
     vault
-        .find_values(text)
+        .find_value_forms(text)
         .into_iter()
-        .filter(|m| !overlaps(protected, m.start, m.end))
-        .map(|m| (m.start, m.end, m.key))
+        .filter(|(m, _)| !overlaps(protected, m.start, m.end))
+        .map(|(m, escaped)| (m.start, m.end, m.key, escaped))
         .collect()
 }
 
@@ -145,11 +146,21 @@ pub fn mask_text(det: &Detector, vault: &mut Vault, text: &str, ctx: &MaskCtx) -
         return (String::new(), report);
     }
     let protected = placeholder_spans(text);
-    // (start, end, key, is_new), vault matches first (sorted, non-overlapping).
-    let mut spans: Vec<(usize, usize, String, bool)> = value_spans(vault, text, &protected)
-        .into_iter()
-        .map(|(s, e, k)| (s, e, k, false))
-        .collect();
+    // (start, end, key, is_new), vault matches first (sorted, non-overlapping). An
+    // escaped occurrence (`pa\"ss` in JSON text) gets its own entry so rehydration
+    // restores exactly the escaped text.
+    let mut spans: Vec<(usize, usize, String, bool)> = Vec::new();
+    for (s, e, key, escaped) in value_spans(vault, text, &protected) {
+        if escaped {
+            let existed = vault.key_for_value(&text[s..e]).is_some();
+            if let Some(k) = vault.intern_escaped_form(&key, &text[s..e], &ctx.source, ctx.now) {
+                spans.push((s, e, k, !existed));
+            }
+        } else {
+            vault.note_masked(&key, ctx.now);
+            spans.push((s, e, key, false));
+        }
+    }
     let taken: Vec<(usize, usize)> = spans.iter().map(|&(s, e, _, _)| (s, e)).collect();
     for f in det.scan(text) {
         // Findings never overlap placeholders (the detector guarantees it) nor each other.
@@ -186,13 +197,16 @@ pub fn mask_known(vault: &Vault, text: &str) -> (String, usize) {
         return (text.to_string(), 0);
     }
     let protected = placeholder_spans(text);
-    let matches = value_spans(vault, text, &protected);
+    // Raw values only: rehydration only ever writes raw values, and this must be its
+    // exact inverse.
+    let matches: Vec<(usize, usize, String, bool)> =
+        value_spans(vault, text, &protected).into_iter().filter(|m| !m.3).collect();
     if matches.is_empty() {
         return (text.to_string(), 0);
     }
     let mut out = String::with_capacity(text.len());
     let mut last = 0;
-    for (s, e, key) in &matches {
+    for (s, e, key, _) in &matches {
         out.push_str(&text[last..*s]);
         out.push_str(&placeholder::wrap(key));
         last = *e;
