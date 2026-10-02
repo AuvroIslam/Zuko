@@ -229,8 +229,14 @@ class UploadSequence {
   private prevT = 0;
   private speed = 0;
 
+  /**
+   * Fixed clock in seconds for deterministic previews (dev/character-preview).
+   * Null = the wall clock, which is all the island ever uses.
+   */
+  clock: number | null = null;
+
   private now(): number {
-    return performance.now() / 1000;
+    return this.clock ?? performance.now() / 1000;
   }
 
   // ── Session lifecycle ─────────────────────────────────────────────────────
