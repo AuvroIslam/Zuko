@@ -5,7 +5,7 @@ import { h, svg, clear } from "./dom";
 import { ICONS } from "./icons";
 import { Bridge, type ChatContext } from "../core/bridge";
 import { Sound } from "../core/sound";
-import { State, type ChatMessage } from "../core/state";
+import { CHAT_PROVIDER_LABEL, State, chatModel, type ChatMessage } from "../core/state";
 import type { ViewHost } from "./views";
 
 let nextId = 1;
@@ -36,7 +36,39 @@ function contextChip(label: string): HTMLElement {
   return chip;
 }
 
+/**
+ * Who answers, and where the words go: "Claude · claude-opus-5 · masked" (the cloud
+ * gets masked text) or "Ollama · gemma3:4b · on this PC". Kept in step with Settings.
+ */
+function chatHead(): { el: HTMLElement; sync(): void } {
+  const dot = h("i", { class: "chat-head-dot" });
+  const who = h("b");
+  const model = h("span", { class: "chat-head-model" });
+  const where = h("span");
+  const el = h("div", { class: "chat-head" }, dot, who, model, where);
+  let painted = "";
+  return {
+    el,
+    sync() {
+      const provider = State.settings.chatProvider ?? "anthropic";
+      const m = chatModel(State.settings, provider);
+      const key = `${provider}|${m}`;
+      if (key === painted) return;
+      painted = key;
+      const local = provider === "ollama";
+      el.classList.toggle("local", local);
+      who.textContent = CHAT_PROVIDER_LABEL[provider];
+      model.textContent = m;
+      where.textContent = local ? "on this PC" : "masked";
+      el.title = local
+        ? "Answered by Ollama on this computer. Nothing leaves your PC."
+        : `Secrets and personal data are masked before anything is sent to ${CHAT_PROVIDER_LABEL[provider]}.`;
+    },
+  };
+}
+
 export function buildPrompt(onHeightChange: () => void): ViewHost {
+  const head = chatHead();
   const chipRow = h("div", { class: "chip-row" });
   const log = h("div", { class: "chat-log" });
   const input = h("input", {
@@ -51,7 +83,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const el = h(
     "div",
     { class: "view" },
-    h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, chipRow, log, bar)),
+    h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, head.el, chipRow, log, bar)),
   );
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
@@ -122,7 +154,9 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         log.scrollTop = log.scrollHeight;
       }
 
-      input.placeholder = State.chatHistory.length === 0 ? "Ask me anything…" : "Continue…";
+      head.sync();
+      const label = CHAT_PROVIDER_LABEL[State.settings.chatProvider ?? "anthropic"];
+      input.placeholder = State.chatHistory.length === 0 ? `Ask ${label} anything…` : `Continue with ${label}…`;
       input.disabled = sending;
     },
     focus() {

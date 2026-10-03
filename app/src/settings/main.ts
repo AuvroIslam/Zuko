@@ -1,6 +1,6 @@
 // Settings window — the place where anything that writes to disk is confirmed.
 // One scrolling page with a sticky section nav: Protection, Policy, Vault,
-// Activity, Documents, Local AI, Browser, Claude and General.
+// Activity, Documents, Local AI, Browser, Chat and General.
 
 import "./settings.css";
 import { Bridge, IS_MOCK, onEvent, type ProtectionStatus } from "../core/bridge";
@@ -12,7 +12,8 @@ import { vaultSection } from "./vault";
 import { activitySection } from "./activity";
 import { documentsSection } from "./documents";
 import { localAiSection } from "./localai";
-import { feedback, hint, section, setDot, statusDot, toggle } from "./ui";
+import { chatSection } from "./chat";
+import { hint, section, setDot, statusDot, toggle } from "./ui";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -62,86 +63,13 @@ function browserSection(status: ProtectionStatus | null): HTMLElement {
   return el;
 }
 
-// ── Claude API key ────────────────────────────────────────────────────────────
+// ── Footer ────────────────────────────────────────────────────────────────────
 
-const MODELS: [string, string][] = [
-  ["claude-opus-5", "Claude Opus 5"],
-  ["claude-sonnet-5", "Claude Sonnet 5"],
-  ["claude-haiku-4-5", "Claude Haiku 4.5"],
-];
-
-function apiSection(hasKey: boolean): HTMLElement {
-  const { el, head } = section("claude", "Claude API key");
-  const dot = statusDot(hasKey);
-  head.prepend(dot);
-  const state = h("span", { class: "hint" });
-
-  const field = h("input", {
-    type: "password",
-    style: "flex:1 1 auto;min-width:0",
-    autocomplete: "off",
-    spellcheck: "false",
-  }) as HTMLInputElement;
-
-  const saveBtn = h("button", { class: "primary", text: "Save key" });
-  const clearBtn = h("button", { class: "danger", text: "Remove" });
-  const fb = feedback();
-
-  function paint(present: boolean) {
-    setDot(dot, present);
-    state.textContent = present
-      ? "Used by the island's chat. Stored in the Windows Credential Manager, never on disk."
-      : "Only the island's chat needs one. Claude Code keeps using its own login.";
-    field.placeholder = present ? "••••••••••••  (stored)" : "sk-ant-...";
-    clearBtn.style.display = present ? "" : "none";
-  }
-
-  async function refresh() {
-    paint((await Bridge.secretPresent("anthropic-api-key")) ?? false);
-  }
-
-  saveBtn.addEventListener("click", async () => {
-    const value = field.value.trim();
-    if (!value) return;
-    try {
-      await Bridge.secretSet("anthropic-api-key", value);
-      field.value = "";
-      fb.show("ok", "Saved.");
-      await refresh();
-    } catch (err) {
-      fb.error(err, "Couldn't save");
-    }
-  });
-
-  clearBtn.addEventListener("click", async () => {
-    try {
-      await Bridge.secretClear("anthropic-api-key");
-      fb.show("ok", "Key removed.");
-      await refresh();
-    } catch (err) {
-      fb.error(err, "Couldn't remove");
-    }
-  });
-
-  const model = h("select", {}) as HTMLSelectElement;
-  for (const [id, label] of MODELS) model.append(h("option", { value: id, text: label }));
-  if (!MODELS.some(([id]) => id === settings.model)) {
-    model.append(h("option", { value: settings.model, text: settings.model }));
-  }
-  model.value = settings.model;
-  model.addEventListener("change", () => {
-    settings.model = model.value;
-    void save();
-  });
-
-  paint(hasKey);
-  el.append(
-    state,
-    h("div", { class: "row" }, h("label", { text: "API key" }), field, saveBtn, clearBtn),
-    h("div", { class: "row" }, h("label", { text: "Chat model" }), model),
-    fb.el,
-  );
-  return el;
+/** Everywhere Zuko sends anything. OpenAI is only named when it answers the chat. */
+function privacyLine(): string {
+  return settings.chatProvider === "openai"
+    ? "No telemetry. Zuko only talks to the Claude API through your own login or key, to the OpenAI API with your key for the island chat (masked text only), and, if you use it, to Ollama on this computer."
+    : "No telemetry. Zuko only talks to the Claude API, through your own login or key (and, if you use it, to Ollama on this computer).";
 }
 
 // ── General ───────────────────────────────────────────────────────────────────
@@ -212,7 +140,7 @@ const SECTIONS: [id: string, label: string][] = [
   ["documents", "Documents"],
   ["localai", "Local AI"],
   ["browser", "Browser"],
-  ["claude", "Claude"],
+  ["chat", "Chat"],
   ["general", "General"],
 ];
 
@@ -249,13 +177,27 @@ async function main() {
     settings = { ...settings, ...boot.settings };
     version = boot.version;
   }
-  const [status, policy, vault, activity, hasKey] = await Promise.all([
+  const [status, policy, vault, activity, hasAnthropicKey, hasOpenAiKey] = await Promise.all([
     Bridge.protectionStatus(),
     Bridge.policyGet(),
     Bridge.vaultList(),
     Bridge.activityRecent(200),
     Bridge.secretPresent("anthropic-api-key"),
+    Bridge.secretPresent("openai-api-key"),
   ]);
+
+  const footer = hint(privacyLine());
+  const chat = chatSection(
+    {
+      get: () => settings,
+      update: (patch) => {
+        settings = { ...settings, ...patch };
+        void save();
+      },
+    },
+    { anthropic: hasAnthropicKey ?? false, openai: hasOpenAiKey ?? false },
+    () => (footer.textContent = privacyLine()),
+  );
 
   const sections = [
     protectionSection(status),
@@ -265,7 +207,7 @@ async function main() {
     documentsSection(),
     localAiSection(policy),
     browserSection(status),
-    apiSection(hasKey ?? false),
+    chat,
     generalSection(),
   ];
   // Dev only: `?mock=1&only=vault,activity` renders just those (screenshots).
@@ -277,11 +219,12 @@ async function main() {
       h("h1", {}, h("span", { text: "Zuko" }), h("span", { class: "version", text: version ? `v${version}` : "" })),
       nav()),
     ...sections.filter((s) => !only || only.includes(s.id)),
-    hint("No telemetry. Zuko only talks to the Claude API, through your own login or key (and, if you turn it on, to Ollama on this computer)."),
+    footer,
   );
 
   void onEvent("settings-changed", (s) => {
     settings = { ...settings, ...s };
+    footer.textContent = privacyLine();
   });
 
   if (window.location.hash) {

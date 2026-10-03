@@ -8,7 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { Settings } from "./state";
+import type { ChatProvider, Settings } from "./state";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -189,10 +189,17 @@ export const Bridge = {
   clipboardUnmask: () => callOrThrow<{ count: number }>("clipboard_unmask"),
 
   // ── Chat, files, secrets ──────────────────────────────────────────────────
-  /** One chat turn. The API key and any file bytes never leave Rust. */
+  /** One chat turn with the provider chosen in Settings → Chat. API keys and file bytes never leave Rust. */
   chatSend: (query: string, context: ChatContext | null) =>
-    callOrThrow<{ text: string }>("chat_send", { query, context }),
+    callOrThrow<ChatReply>("chat_send", { query, context }),
   chatReset: () => call<void>("chat_reset"),
+  /**
+   * The model dropdown for one provider. OpenAI's list is fetched by Rust with the
+   * stored key (the key never reaches the webview); Ollama's lists installed models.
+   */
+  chatModels: (provider: ChatProvider) => callOrThrow<ChatModels>("chat_models", { provider }),
+  /** Can the chat work with `provider` (default: the chosen one)? Nothing is sent to a cloud provider. */
+  chatStatus: (provider?: ChatProvider) => callOrThrow<ChatStatus>("chat_status", { provider: provider ?? null }),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
   /** Only ever tells you whether a key exists — never its value. */
@@ -206,6 +213,42 @@ export const Bridge = {
 export type ChatContext =
   | { kind: "file"; name: string; path: string }
   | { kind: "window"; appName: string; title: string; url?: string };
+
+export interface ChatReply {
+  /** The answer, with placeholders restored on this machine. */
+  text: string;
+  /** What was masked before the turn was sent (keys and labels, never values). */
+  masked: { key: string; label: string }[];
+}
+
+export interface ChatModels {
+  provider: ChatProvider;
+  /** Sorted. Claude: Zuko's list; OpenAI: chat models the key can use; Ollama: installed models. */
+  models: string[];
+  /** The saved model, or (OpenAI) a sensible default when the saved one is not offered any more. */
+  selected: string;
+  /** Why the list could not be fetched (no key, offline, Ollama not running…). */
+  error: string | null;
+}
+
+export interface ChatStatus {
+  provider: ChatProvider;
+  /** "Claude" | "OpenAI" | "Ollama" */
+  label: string;
+  model: string;
+  /** True when the masked conversation leaves this machine. */
+  cloud: boolean;
+  ready: boolean;
+  /** Cloud providers: whether a key is stored (never the key). Null for Ollama. */
+  keyPresent: boolean | null;
+  /** Ollama only: the local AI endpoint the chat uses, and what /api/tags said. */
+  endpoint: string | null;
+  reachable: boolean | null;
+  modelPresent: boolean | null;
+  error: string | null;
+  /** e.g. `ollama pull gemma3:4b` */
+  hint: string | null;
+}
 
 export interface DroppedFile {
   name: string;

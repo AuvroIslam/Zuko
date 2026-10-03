@@ -58,6 +58,12 @@ async function main() {
 
   // The settings window writes preferences; apply them here without a restart.
   await onEvent("settings-changed", (s) => {
+    // A conversation belongs to one chat provider (Rust drops it on the next turn):
+    // clear the bubbles too, so the screen never suggests otherwise.
+    if (s.chatProvider && s.chatProvider !== State.settings.chatProvider && State.chatHistory.length) {
+      State.chatHistory = [];
+      void Bridge.chatReset();
+    }
     State.settings = { ...State.settings, ...s };
     island.applySettings();
   });

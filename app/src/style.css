@@ -780,6 +780,47 @@ input[type="range"]::-webkit-slider-thumb {
   padding: 12px 16px 14px 84px;
 }
 
+/* Who answers the chat: "Claude · claude-opus-5 · masked" / "Ollama · gemma3:4b · on this PC". */
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font: 400 10.5px var(--font);
+  color: var(--dim-3);
+  white-space: nowrap;
+}
+
+.chat-head b {
+  font-weight: 600;
+  color: var(--dim);
+}
+
+.chat-head-model {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.chat-head > span::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--dim-4);
+}
+
+.chat-head-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--indigo);
+}
+
+.chat-head.local .chat-head-dot {
+  background: var(--green);
+}
+
 .chip-row:empty {
   display: none;
 }

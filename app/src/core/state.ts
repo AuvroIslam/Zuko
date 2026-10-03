@@ -148,9 +148,34 @@ export interface Settings {
   screen: "primary" | "cursor";
   autostart: boolean;
   hooksInstalled: boolean;
-  /** Claude model used by the chat. */
+  /** Who answers the island chat. */
+  chatProvider: ChatProvider;
+  /** Claude model used by the chat (the Anthropic provider; the field predates the others). */
   model: string;
+  /** OpenAI model used by the chat. */
+  openaiModel: string;
+  /** Ollama model used by the chat (independent of the local AI's scan model). */
+  ollamaModel: string;
 }
+
+/** Who answers the island chat: Claude and OpenAI get masked text, Ollama stays on this PC. */
+export type ChatProvider = "anthropic" | "openai" | "ollama";
+
+export const CHAT_PROVIDERS: readonly ChatProvider[] = ["anthropic", "openai", "ollama"];
+
+/** The name the user reads. */
+export const CHAT_PROVIDER_LABEL: Record<ChatProvider, string> = {
+  anthropic: "Claude",
+  openai: "OpenAI",
+  ollama: "Ollama",
+};
+
+/** Settings field holding each provider's model. */
+export const CHAT_MODEL_FIELD = {
+  anthropic: "model",
+  openai: "openaiModel",
+  ollama: "ollamaModel",
+} as const satisfies Record<ChatProvider, keyof Settings>;
 
 export const DEFAULT_SETTINGS: Settings = {
   soundEnabled: true,
@@ -160,8 +185,17 @@ export const DEFAULT_SETTINGS: Settings = {
   screen: "primary",
   autostart: false,
   hooksInstalled: false,
+  chatProvider: "anthropic",
   model: "claude-opus-5",
+  openaiModel: "gpt-5-mini",
+  ollamaModel: "gemma3:4b",
 };
+
+/** The model the chat uses with `provider` (the default when the field is blank). */
+export function chatModel(s: Settings, provider: ChatProvider = s.chatProvider): string {
+  const field = CHAT_MODEL_FIELD[provider];
+  return s[field]?.trim() || DEFAULT_SETTINGS[field];
+}
 
 type Listener = () => void;
 

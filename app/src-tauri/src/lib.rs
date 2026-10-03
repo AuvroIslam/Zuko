@@ -5,7 +5,7 @@
 // grants the webview direct access to the clipboard or to shortcut registration.
 
 mod auditlog;
-mod claude;
+mod chat;
 mod clipcopy;
 mod commands;
 mod engine;
@@ -34,7 +34,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
 
-use claude::{Chat, ChatContext, ChatReply};
+use chat::{Chat, ChatContext, ChatModels, ChatReply, ChatStatus, Provider, Target};
 use engine::Engine;
 use events::PrivacyNote;
 use files::DroppedFile;
@@ -274,7 +274,8 @@ fn approval_decline(app: AppHandle, request_id: String) {
 
 // ── Chat, files and secrets ───────────────────────────────────────────────────
 
-/// One chat turn. The API key and any file bytes stay on the Rust side.
+/// One chat turn with the provider chosen in Settings → Chat. API keys and any file
+/// bytes stay on the Rust side.
 #[tauri::command]
 async fn chat_send(
     app: AppHandle,
@@ -284,10 +285,17 @@ async fn chat_send(
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
-    let model = shared.settings.lock().unwrap().model.clone();
-    let reply = claude::send(&engine, &chat, &model, query, context).await?;
+    let target = {
+        let s = shared.settings.lock().unwrap();
+        Target { provider: s.chat_provider, model: s.chat_model(s.chat_provider) }
+    };
+    let reply = chat::send(&engine, &chat, &target, query, context).await?;
     // Tell the user what was masked before the message left (keys only).
     if reply.report.count > 0 {
+        let to = match target.provider {
+            Provider::Ollama => "Ollama on this PC".to_string(),
+            cloud => cloud.label().to_string(),
+        };
         events::announce_privacy(
             &app,
             &engine,
@@ -296,7 +304,7 @@ async fn chat_send(
                 event: "Chat",
                 tool: "message",
                 summary: format!(
-                    "Masked {} before sending to Claude",
+                    "Masked {} before sending to {to}",
                     if reply.report.count == 1 { "1 value".to_string() } else { format!("{} values", reply.report.count) }
                 ),
                 direction: "masked",
@@ -313,6 +321,35 @@ async fn chat_send(
 #[tauri::command]
 fn chat_reset(chat: State<Chat>) {
     chat.reset();
+}
+
+fn chat_provider(name: &str) -> Result<Provider, String> {
+    Provider::parse(name).ok_or_else(|| format!("unknown chat provider {name}"))
+}
+
+/// The model dropdown for one provider in Settings → Chat. OpenAI's list is fetched
+/// here with the stored key (which never reaches the webview); Ollama's comes from
+/// /api/tags on the loopback endpoint.
+#[tauri::command]
+async fn chat_models(shared: State<'_, Shared>, engine: State<'_, Engine>, provider: String) -> Result<ChatModels, String> {
+    let provider = chat_provider(&provider)?;
+    let saved = shared.settings.lock().unwrap().chat_model(provider);
+    Ok(chat::models(&engine, provider, &saved).await)
+}
+
+/// Can the chat work with `provider` (default: the chosen one)? A stored key for the
+/// cloud providers (presence only, nothing is sent), Ollama running with the model.
+#[tauri::command]
+async fn chat_status(shared: State<'_, Shared>, engine: State<'_, Engine>, provider: Option<String>) -> Result<ChatStatus, String> {
+    let (provider, model) = {
+        let s = shared.settings.lock().unwrap();
+        let provider = match provider.as_deref() {
+            Some(name) => chat_provider(name)?,
+            None => s.chat_provider,
+        };
+        (provider, s.chat_model(provider))
+    };
+    Ok(chat::status(&engine, provider, &model).await)
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
@@ -478,6 +515,8 @@ pub fn run() {
             log_line,
             chat_send,
             chat_reset,
+            chat_models,
+            chat_status,
             ingest_file,
             secret_present,
             secret_set,

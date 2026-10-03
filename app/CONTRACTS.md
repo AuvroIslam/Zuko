@@ -80,9 +80,21 @@ New commands (JS argument names are camelCase):
 | `clipboard_unmask` | — | `{ count: number }` |
 | `localai_status` | `config: LocalAiConfig \| null` (unsaved draft; null = saved policy) | `LocalAiStatus` |
 | `localai_test` | `config: LocalAiConfig \| null` | `LocalAiTest` (deep scan of a made-up sentence; never touches the vault) |
+| `chat_models` | `provider: ChatProvider` | `ChatModels` (the Settings → Chat dropdown; OpenAI's list is fetched in Rust with the stored key, Ollama's from `/api/tags` on the loopback endpoint) |
+| `chat_status` | `provider: ChatProvider \| null` (null = the chosen one) | `ChatStatus` (key presence for the cloud providers, nothing is sent; Ollama reachability and model) |
 
 `approval_decision` gains an optional `elapsedMs: number` (time the card was on screen),
 used for rubber-stamp detection.
+
+`chat_send` (`query: string, context: ChatContext | null` → `ChatReply`) talks to the
+provider chosen in `Settings.chatProvider` with that provider's model. Same privacy
+pipeline for every provider: the message, window context and attached text/PDF text are
+masked with the engine (source `"chat"`), the placeholder legend is appended to the
+system prompt, the reply is rehydrated locally, a `privacy` event is emitted, images and
+scanned PDFs are refused. A conversation belongs to one provider: the first turn with
+another provider starts a new one (the island clears its bubbles when the provider
+changes). `secret_present` / `secret_set` / `secret_clear` accept `"anthropic-api-key"`
+and `"openai-api-key"` (presence only, never the value; the vault key is out of reach).
 
 ### Types
 ```ts
@@ -181,6 +193,47 @@ interface LocalAiTest {
   ms: number;
   error: string | null;
 }
+
+// The island chat. Claude and OpenAI get masked text; Ollama runs on this machine.
+type ChatProvider = "anthropic" | "openai" | "ollama";
+
+// Settings (settings.json) chat fields; serde defaults, so older files load unchanged.
+// An unknown chatProvider (e.g. written by a newer build) reads as "ollama": nothing
+// leaves the machine and the other preferences survive.
+interface ChatSettings {
+  chatProvider: ChatProvider;  // default "anthropic"
+  model: string;               // the Claude model (field name predates the others), default "claude-opus-5"
+  openaiModel: string;         // default "gpt-5-mini"
+  ollamaModel: string;         // default "gemma3:4b"; endpoint = policy localAi.endpoint (loopback only),
+                               // used whether or not localAi.enabled is on
+}
+
+interface ChatReply {
+  text: string;                               // placeholders restored on this machine
+  masked: { key: string; label: string }[];   // what was masked in this turn (never values)
+}
+
+interface ChatModels {
+  provider: ChatProvider;
+  models: string[];        // sorted. OpenAI: GET /v1/models filtered to chat models (gpt-*, chatgpt-*, o<digit>*,
+                           // minus image/audio/realtime/tts/transcribe/embedding/moderation/search/instruct/codex/-pro)
+  selected: string;        // the saved model; OpenAI: a sensible default when the saved one is not offered
+  error: string | null;    // no key, offline, 401, Ollama not running…
+}
+
+interface ChatStatus {
+  provider: ChatProvider;
+  label: string;           // "Claude" | "OpenAI" | "Ollama"
+  model: string;
+  cloud: boolean;          // the masked conversation leaves this machine
+  ready: boolean;
+  keyPresent: boolean | null;    // cloud providers only
+  endpoint: string | null;       // Ollama only
+  reachable: boolean | null;     // Ollama only
+  modelPresent: boolean | null;  // Ollama only
+  error: string | null;
+  hint: string | null;           // e.g. "ollama pull gemma3:4b"
+}
 ```
 
 **Local AI rule:** the local model may only make Zuko stricter. Deterministic masking and
@@ -257,7 +310,8 @@ Extension → app messages (`{"op": …}`):
 
 | Path | Content |
 |---|---|
-| `%APPDATA%\Zuko\settings.json` | UI settings (`Settings`) |
+| `%APPDATA%\Zuko\settings.json` | UI settings (`Settings`, including the chat fields above; never a key) |
+| OS keyring, service `app.zuko.desktop` | `anthropic-api-key`, `openai-api-key` (the island chat; the UI may set, clear and ask presence, never read), `vault-key` (internal only) |
 | `%APPDATA%\Zuko\policy.json` | `Policy` (pretty JSON) |
 | `%LOCALAPPDATA%\Zuko\vault.bin` | vault JSON encrypted with XChaCha20-Poly1305; 32-byte key in the OS keyring under `vault-key` |
 | `%LOCALAPPDATA%\Zuko\audit\audit.jsonl` | hash-chained `Receipt` lines |

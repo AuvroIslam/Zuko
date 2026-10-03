@@ -70,6 +70,9 @@ so conversations stay consistent.
 - The **browser extension** does the same on ChatGPT, claude.ai and DeepSeek. It
   masks prompts and uploaded files before they are sent, restores the values in the
   answers you read, and fixes copy buttons so copied code carries the real values.
+- The **island chat** answers with Claude, OpenAI (your own key) or a local model in
+  Ollama (**Settings → Chat**). Claude and OpenAI only ever see masked text; with
+  Ollama nothing leaves your PC.
 
 ---
 
@@ -131,7 +134,7 @@ The interfaces between parts are in [`app/CONTRACTS.md`](app/CONTRACTS.md).
 ```powershell
 cd app
 cargo test -p zuko-core      # engine: detection fixtures, streaming split tests, 51-scenario attack benchmark
-cargo test -p zuko --lib     # app: gateway (mock upstream), vault store, audit log, sanitizer, chat
+cargo test -p zuko --lib     # app: gateway (mock upstream), vault store, audit log, sanitizer, chat (mock OpenAI/Ollama)
 node core/wasm/smoke.mjs     # the WASM engine (after: cargo build -p zuko-core --target wasm32-unknown-unknown --release)
 ```
 
