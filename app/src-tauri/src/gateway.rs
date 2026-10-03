@@ -24,9 +24,9 @@
 //   bytes hex, upstream defaults to https://api.anthropic.com (or the user's previous
 //   ANTHROPIC_BASE_URL captured at install time, see set_upstream).
 // * When masking added placeholders to the newest message (what the user just typed
-//   or a tool just returned) or created vault entries, the request counts towards
-//   `stats.masked` and emits a `privacy` event (source "gateway"), an activity item
-//   and an audit receipt (event "Gateway", verdict "masked", request body SHA-256).
+//   or a tool just returned) or created vault entries, the request emits a `privacy`
+//   event (source "gateway"), an activity item and an audit receipt (event "Gateway",
+//   verdict "masked", request body SHA-256), which counts on today's "masked" counter.
 //   History is re-masked on every request, so it is not reported again. Only keys
 //   and labels are ever reported or logged, never values.
 //

@@ -101,9 +101,13 @@ function render(s: Status): void {
     hint.textContent = `The privacy engine is missing, so Zuko can only block obvious secrets. ${s.engineError ?? ""} Build zuko_core.wasm and rebuild the extension (see the README).`.trim();
   } else if (!s.linked) {
     hint.hidden = false;
-    hint.textContent =
-      "Zuko works on its own. Link the desktop app to share one vault with Claude Code" +
-      (s.linkError ? ` (${s.linkError.replace(/\.$/, "")}).` : ".");
+    // "host not found": the browser has never been told about the bridge, which the desktop
+    // app registers when it starts.
+    const unregistered = /not found/i.test(s.linkError ?? "");
+    hint.textContent = unregistered
+      ? "Zuko works on its own. To share one vault with Claude Code, start the Zuko desktop app once (it registers its bridge for this browser), then reload this extension."
+      : "Zuko works on its own. Link the desktop app to share one vault with Claude Code" +
+        (s.linkError ? ` (${s.linkError.replace(/\.$/, "")}).` : ". It connects by itself within half a minute of starting.");
   } else {
     hint.hidden = true;
   }

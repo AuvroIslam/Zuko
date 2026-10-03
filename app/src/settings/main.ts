@@ -3,7 +3,7 @@
 // Activity, Documents, Local AI, Browser, Chat and General.
 
 import "./settings.css";
-import { Bridge, IS_MOCK, onEvent, type ProtectionStatus } from "../core/bridge";
+import { Bridge, IS_MOCK, onEvent, type NativeHostStatus, type ProtectionStatus } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear, copyText } from "../views/dom";
 import { protectionSection } from "./protection";
@@ -13,7 +13,7 @@ import { activitySection } from "./activity";
 import { documentsSection } from "./documents";
 import { localAiSection } from "./localai";
 import { chatSection } from "./chat";
-import { hint, section, setDot, statusDot, toggle } from "./ui";
+import { feedback, hint, section, setDot, statusDot, sub, toggle } from "./ui";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -26,7 +26,71 @@ async function save() {
 
 // ── Browser extension ─────────────────────────────────────────────────────────
 
-function browserSection(status: ProtectionStatus | null): HTMLElement {
+/** "Chrome and Edge", "Chrome, Edge and Brave". */
+function listNames(names: string[]): string {
+  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The browser bridge: the native messaging host `app.zuko.host`, which Zuko registers for
+ * this user at launch. Without it the extension cannot reach the app at all.
+ */
+function bridgeBlock(initial: NativeHostStatus | null): HTMLElement {
+  const dot = statusDot("off");
+  const title = h("b", {});
+  const button = h("button", { class: "small" });
+  const detail = hint("");
+  const fb = feedback();
+  let status = initial;
+
+  const paint = () => {
+    const s = status;
+    fb.clear();
+    if (!s) {
+      setDot(dot, "off");
+      title.textContent = "Browser bridge: status unknown";
+      button.style.display = "none";
+      detail.textContent = "";
+      return;
+    }
+    const names = s.browsers.filter((b) => b.registered).map((b) => b.name);
+    setDot(dot, s.registered ? (s.hostPresent ? "ok" : "warn") : names.length ? "warn" : "off");
+    title.textContent = s.registered
+      ? `Browser bridge: registered for ${listNames(names)}`
+      : names.length
+        ? `Browser bridge: only partly registered (${listNames(names)})`
+        : "Browser bridge: not registered";
+    button.style.display = "";
+    button.textContent = s.enabled && s.registered ? "Unregister" : "Register";
+    detail.textContent = s.enabled && s.registered
+      ? "Zuko registers app.zuko.host for your user account at every launch (no admin rights, nothing machine-wide). If the extension still says it is not linked, reload it once: chrome://extensions or edge://extensions, then the reload arrow on the Zuko card."
+      : "The extension reaches this app through a small helper, app.zuko.host, that each browser has to know about. Register it, then reload the Zuko extension (chrome://extensions or edge://extensions, the reload arrow on its card) so it connects right away.";
+    if (!s.hostPresent) fb.show("warn", `The helper is missing (${s.hostPath}). Restart Zuko, or reinstall it if this stays.`);
+    if (s.error) fb.show("err", `Couldn't finish: ${s.error}`);
+  };
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      status = await Bridge.nativeHostSet(!(status?.enabled && status.registered));
+      paint();
+      if (status.registered && !status.error) fb.show("ok", "Registered. Now reload the Zuko extension so it connects.");
+    } catch (e) {
+      fb.error(e, "Couldn't change the browser bridge");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  paint();
+  return h("div", { class: "bridge" },
+    h("div", { class: "row" }, dot, title, h("div", { class: "spacer" }), button),
+    detail,
+    fb.el,
+  );
+}
+
+function browserSection(status: ProtectionStatus | null, bridge: NativeHostStatus | null): HTMLElement {
   const { el, head } = section("browser", "Browser extension");
   const dot = statusDot(status?.extensionConnected ? "ok" : "off");
   head.prepend(dot);
@@ -36,7 +100,7 @@ function browserSection(status: ProtectionStatus | null): HTMLElement {
     setDot(dot, on ? "ok" : "off");
     line.textContent = on
       ? "Connected — the extension checked in during the last minute."
-      : "Not connected. Install it once, keep Zuko running, and it connects by itself.";
+      : "Not connected. Keep Zuko running with the browser bridge registered (below), and the extension connects by itself within half a minute.";
   };
   paint(status);
   void onEvent("protection-changed", paint);
@@ -53,6 +117,8 @@ function browserSection(status: ProtectionStatus | null): HTMLElement {
   el.append(
     line,
     hint("Masks your prompts on ChatGPT, claude.ai and DeepSeek before they are sent, restores the answers on screen, and sanitizes uploaded files."),
+    bridgeBlock(bridge),
+    sub("Install the extension"),
     h("ol", { class: "steps" },
       h("li", {}, "Open ", h("code", { text: "chrome://extensions" }), " (or ", h("code", { text: "edge://extensions" }), ") ", copy("chrome://extensions")),
       h("li", { text: "Turn on Developer mode (top right)." }),
@@ -107,6 +173,17 @@ function generalSection(): HTMLElement {
     void save();
   });
 
+  const resetPosition = h("button", { class: "small", text: "Reset island position" }) as HTMLButtonElement;
+  const paintReset = () => {
+    const centred = Math.abs(settings.islandOffset ?? 0) < 0.0005;
+    resetPosition.disabled = centred;
+    resetPosition.title = centred ? "The island is at the top centre." : "Back to the top centre of the display";
+  };
+  resetPosition.addEventListener("click", () => void Bridge.resetIslandPosition());
+  paintReset();
+  // A drag on the island (or this button) comes back as settings-changed.
+  void onEvent("settings-changed", () => window.setTimeout(paintReset, 0));
+
   el.append(
     h("div", { class: "row" },
       h("label", { text: "Sound" }),
@@ -121,6 +198,11 @@ function generalSection(): HTMLElement {
     h("div", { class: "row" },
       h("label", { text: "Island lives on" }),
       screen,
+    ),
+    h("div", { class: "row" },
+      h("label", { text: "Island position" }),
+      resetPosition,
+      h("span", { class: "hint", text: "Drag the island by its top bar to move it along the top edge; double-click the bar to centre it." }),
     ),
     h("div", { class: "row" },
       h("label", { text: "Launch at startup" }),
@@ -177,13 +259,14 @@ async function main() {
     settings = { ...settings, ...boot.settings };
     version = boot.version;
   }
-  const [status, policy, vault, activity, hasAnthropicKey, hasOpenAiKey] = await Promise.all([
+  const [status, policy, vault, activity, hasAnthropicKey, hasOpenAiKey, bridge] = await Promise.all([
     Bridge.protectionStatus(),
     Bridge.policyGet(),
     Bridge.vaultList(),
     Bridge.activityRecent(200),
     Bridge.secretPresent("anthropic-api-key"),
     Bridge.secretPresent("openai-api-key"),
+    Bridge.nativeHostStatus(),
   ]);
 
   const footer = hint(privacyLine());
@@ -206,7 +289,7 @@ async function main() {
     activitySection(activity, status?.auditPath ?? ""),
     documentsSection(),
     localAiSection(policy),
-    browserSection(status),
+    browserSection(status, bridge),
     chat,
     generalSection(),
   ];

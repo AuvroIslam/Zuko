@@ -4,6 +4,13 @@
 //
 // The host answers strictly one reply per request and echoes our `id`, so a reply that
 // arrives after a timeout can never be mistaken for the answer to a later request.
+//
+// Heartbeat: the app shows the extension as connected only while it heard from it in the
+// last minute, so a linked extension says `hello` every 25 s. The open native port keeps
+// the service worker alive meanwhile (Chrome 105+), so a plain timer is enough here; the
+// service worker's alarm (sw.ts) covers the time it is asleep, unlinked. A heartbeat the
+// host answers with an error (the app was closed) drops the link, and the next reconnect
+// re-syncs policy and vault when the app is back.
 
 import type { AppLink, DeepScanReply, LocalAiStatus } from "./brain.ts";
 import type { MaskReport, VaultJson } from "../shared/engine.ts";
@@ -16,6 +23,10 @@ interface Pending {
 }
 
 const RETRY_AFTER_MS = 20_000;
+/** Under half of the app's 60 s "connected" window, so one late beat never drops it. */
+export const HEARTBEAT_MS = 25_000;
+/** Heartbeats that may go unanswered in a row (a busy app) before the link counts as dead. */
+const MISSED_BEATS = 2;
 
 export class NativeLink implements AppLink {
   private port: chrome.runtime.Port | null = null;
@@ -23,6 +34,8 @@ export class NativeLink implements AppLink {
   private nextId = 1;
   private connecting: Promise<boolean> | null = null;
   private lastAttempt = 0;
+  private beatTimer: ReturnType<typeof setInterval> | null = null;
+  private missed = 0;
 
   linked = false;
   /** The app's local-AI status as of the last policy read (null: unknown / older app). */
@@ -36,17 +49,70 @@ export class NativeLink implements AppLink {
 
   private readonly version: string;
   private readonly host: string;
+  private readonly heartbeatMs: number;
+  private readonly beatTimeoutMs: number;
+  private readonly retryAfterMs: number;
 
-  constructor(version: string, host = HOST_NAME) {
+  /** `timing` shortens the heartbeat, its answer deadline and the retry throttle (tests). */
+  constructor(
+    version: string,
+    host = HOST_NAME,
+    timing: { heartbeatMs?: number; beatTimeoutMs?: number; retryAfterMs?: number } = {},
+  ) {
     this.version = version;
     this.host = host;
+    this.heartbeatMs = timing.heartbeatMs ?? HEARTBEAT_MS;
+    this.beatTimeoutMs = timing.beatTimeoutMs ?? 5000;
+    this.retryAfterMs = timing.retryAfterMs ?? RETRY_AFTER_MS;
   }
 
-  /** Connects if not linked. Throttled: a missing host is retried at most every 20 s unless `force`. */
+  /**
+   * The periodic check (the service worker's alarm calls it too): a linked extension says
+   * hello so the app keeps showing it as connected; an unlinked one tries to link again
+   * (throttled like every other retry).
+   */
+  async tick(): Promise<void> {
+    if (!this.linked) {
+      await this.connect();
+      return;
+    }
+    const port = this.port;
+    const r = await this.rpc({ op: "hello", version: this.version }, this.beatTimeoutMs);
+    if (!this.linked || this.port !== port) return; // the link changed meanwhile
+    if (r?.ok === true) {
+      this.missed = 0;
+      if (typeof r.version === "string") this.appVersion = r.version;
+      return;
+    }
+    // The host answered for an app that is gone, or nobody answered twice in a row.
+    if (r !== null || ++this.missed >= MISSED_BEATS) {
+      if (typeof r?.error === "string") this.lastError = r.error;
+      this.disconnect();
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.missed = 0;
+    const timer = setInterval(() => void this.tick(), this.heartbeatMs);
+    // Node (the tests) would otherwise stay up for the timer; a browser timer has no unref.
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.beatTimer = timer;
+  }
+
+  private stopHeartbeat(): void {
+    if (this.beatTimer !== null) clearInterval(this.beatTimer);
+    this.beatTimer = null;
+  }
+
+  /**
+   * Connects if not linked. Throttled: a missing host is retried at most every 20 s unless
+   * `force` (the heartbeat alarm in sw.ts fires every 30 s, so each one gets its attempt).
+   */
   connect(force = false): Promise<boolean> {
     if (this.linked) return Promise.resolve(true);
     if (this.connecting) return this.connecting;
-    if (!force && Date.now() - this.lastAttempt < RETRY_AFTER_MS) return Promise.resolve(false);
+    if (!force && Date.now() - this.lastAttempt < this.retryAfterMs) return Promise.resolve(false);
     this.lastAttempt = Date.now();
     this.connecting = this.doConnect().finally(() => {
       this.connecting = null;
@@ -56,7 +122,7 @@ export class NativeLink implements AppLink {
 
   /** Fire-and-forget retry used on hot paths. */
   maybeReconnect(): void {
-    if (!this.linked && !this.connecting && Date.now() - this.lastAttempt >= RETRY_AFTER_MS) void this.connect();
+    if (!this.linked && !this.connecting && Date.now() - this.lastAttempt >= this.retryAfterMs) void this.connect();
   }
 
   private async doConnect(): Promise<boolean> {
@@ -76,6 +142,7 @@ export class NativeLink implements AppLink {
       this.linked = true;
       this.appVersion = typeof hello.version === "string" ? hello.version : null;
       this.lastError = null;
+      this.startHeartbeat();
       this.onChange?.();
       try {
         await this.onLinked?.();
@@ -115,6 +182,7 @@ export class NativeLink implements AppLink {
   private cleanup(port: chrome.runtime.Port): void {
     if (this.port !== port) return;
     this.port = null;
+    this.stopHeartbeat();
     const wasLinked = this.linked;
     this.linked = false;
     this.localAi = null;

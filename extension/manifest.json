@@ -25,7 +25,8 @@
     "storage",
     "offscreen",
     "nativeMessaging",
-    "clipboardWrite"
+    "clipboardWrite",
+    "alarms"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",

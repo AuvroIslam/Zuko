@@ -149,6 +149,55 @@ pub fn find_on_path(stem: &str) -> Option<PathBuf> {
         })
 }
 
+// ── Browser native messaging ──────────────────────────────────────────────────
+//
+// Chrome-family browsers on Linux look for `<host name>.json` in their own
+// NativeMessagingHosts folder under ~/.config (per user, nothing system-wide).
+
+/// Browsers that can start the extension's native host: name, the browser's folder under
+/// $XDG_CONFIG_HOME, and whether to register it even when that folder is missing (never
+/// here: a folder for a browser that is not installed would only be clutter).
+pub const NATIVE_MESSAGING_BROWSERS: &[(&str, &str, bool)] = &[
+    ("Chrome", "google-chrome", false),
+    ("Edge", "microsoft-edge", false),
+    ("Chromium", "chromium", false),
+    ("Brave", "BraveSoftware/Brave-Browser", false),
+];
+
+/// Linux browsers get a copy of the manifest (Windows ones are told where it is).
+pub const NATIVE_MESSAGING_BY_PATH: bool = false;
+
+fn native_messaging_file(browser_home: &str, host: &str) -> PathBuf {
+    xdg("XDG_CONFIG_HOME", ".config").join(browser_home).join("NativeMessagingHosts").join(format!("{host}.json"))
+}
+
+/// The browser has a settings folder for this user.
+pub fn native_messaging_browser_present(browser_home: &str) -> bool {
+    xdg("XDG_CONFIG_HOME", ".config").join(browser_home).is_dir()
+}
+
+/// The manifest the browser holds for `host`, if any.
+pub fn native_messaging_read(browser_home: &str, host: &str) -> Option<String> {
+    std::fs::read_to_string(native_messaging_file(browser_home, host)).ok()
+}
+
+/// Gives the browser its copy of the manifest.
+pub fn native_messaging_write(browser_home: &str, host: &str, manifest: &str) -> std::io::Result<()> {
+    let file = native_messaging_file(browser_home, host);
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(file, manifest)
+}
+
+/// Removes the browser's copy of the manifest. Already gone is fine.
+pub fn native_messaging_remove(browser_home: &str, host: &str) -> std::io::Result<()> {
+    match std::fs::remove_file(native_messaging_file(browser_home, host)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
 // ── Cursor ────────────────────────────────────────────────────────────────────
 
 /// Nothing polls the cursor here: the page reports it over the island, and the

@@ -31,15 +31,15 @@ const FILTERS: [Filter, string][] = [
 /** Rows rendered at most; the rest is one scroll away in the settings window. */
 const MAX_ROWS = 60;
 
-/** "Open file" for a Write/Edit row: VS Code at that file, or its folder. */
-function openFileButton(path: string): HTMLElement {
+/** "Open file" for a Write/Edit row: VS Code at that file, in the session's window, or its folder. */
+function openFileButton(path: string, cwd: string | undefined): HTMLElement {
   return h("button", {
     class: "link-btn feed-open",
     text: "Open file",
     title: path,
     onclick: (e: Event) => {
       e.stopPropagation();
-      void Bridge.openFile(path);
+      void Bridge.openFile(path, cwd);
     },
   });
 }
@@ -61,7 +61,7 @@ function feedRow(item: ActivityItem): HTMLElement {
     h("span", { class: "feed-text", text }),
     tier,
     h("span", { class: "feed-where", text: where }),
-    item.path ? openFileButton(item.path) : null,
+    item.path ? openFileButton(item.path, item.cwd) : null,
     h("span", { class: "feed-ago", text: timeAgo(item.ts) }),
   );
 }
@@ -89,7 +89,9 @@ export function buildActivity(actions: ViewActions): ViewHost {
   const statBlocked = h("b", { style: "color:#F4505E" });
   const statAsked = h("b", { style: "color:#F5A524" });
   const statMasked = h("b", { style: "color:#2DD4BF" });
-  const stats = h("div", { class: "feed-stats" },
+  // Today's numbers (local date): they match what the feed's filters show for today.
+  const stats = h("div", { class: "feed-stats", title: "Counted since midnight, from the audit log" },
+    h("i", { class: "feed-stats-when", text: "Today" }),
     h("div", {}, statBlocked, h("span", { text: "blocked" })),
     h("div", {}, statAsked, h("span", { text: "asked" })),
     h("div", {}, statMasked, h("span", { text: "masked" })),

@@ -14,7 +14,8 @@ const manifest = JSON.parse(readFileSync(join(extRoot, "manifest.json"), "utf8")
 test("manifest: MV3, the four sites only, the requested permissions only", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual(manifest.host_permissions, ["https://chatgpt.com/*", "https://chat.openai.com/*", "https://claude.ai/*", "https://chat.deepseek.com/*"]);
-  assert.deepEqual([...manifest.permissions].sort(), ["clipboardWrite", "nativeMessaging", "offscreen", "storage"]);
+  // `alarms`: the heartbeat that relinks a sleeping service worker to the desktop app.
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "clipboardWrite", "nativeMessaging", "offscreen", "storage"]);
   assert.equal(manifest.background.type, "module");
   assert.equal(manifest.background.service_worker, "sw.js");
   assert.equal(manifest.action.default_popup, "popup.html");
@@ -90,6 +91,16 @@ test("host manifest: one allowed origin (this extension), stdio, the right name"
   });
   assert.throws(() => hostManifest({ exePath: "x", extensionId: "not-an-id" }), /valid extension ID/);
   assert.throws(() => hostManifest({ exePath: "x", extensionId: "*" }), /valid extension ID/);
+});
+
+test("the desktop app registers the host for this extension's ID, under the same name", () => {
+  // app/src-tauri/src/nativehost.rs writes the host manifest at every launch; the origin it
+  // allows must be the ID this manifest's key pins, or Chrome refuses the connection.
+  const src = readFileSync(join(repoRoot, "app", "src-tauri", "src", "nativehost.rs"), "utf8");
+  assert.equal(src.match(/pub const EXTENSION_ID: &str = "([a-p]{32})";/)?.[1], readExtensionId());
+  assert.match(src, /pub const HOST_NAME: &str = "app\.zuko\.host";/);
+  assert.match(src, /const DESCRIPTION: &str = "Zuko: browser extension to desktop app bridge";/);
+  assert.equal(hostManifest({ exePath: "x", extensionId: readExtensionId() }).description, "Zuko: browser extension to desktop app bridge");
 });
 
 test("registry commands target HKCU for Chrome and Edge only", () => {

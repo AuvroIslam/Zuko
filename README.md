@@ -101,7 +101,10 @@ first), and click **Apply**:
 Uninstalling restores your settings exactly, including a previous
 `ANTHROPIC_BASE_URL`.
 
-The browser extension is in [`extension/`](extension/README.md).
+The browser extension is in [`extension/`](extension/README.md). Zuko registers its
+bridge to the extension (the native messaging host `app.zuko.host`) for your user at
+every launch, for Chrome and Edge; **Settings → Browser** shows it and can unregister it.
+Load the extension, reload it once after Zuko's first launch, and it links by itself.
 
 ## How it works
 

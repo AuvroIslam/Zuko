@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appEvents, appPort, localData, offscreen, page, popup, send, sessionData, setNative, toasts } from "./fake-chrome.mjs";
+import { alarms, appEvents, appPort, fireAlarm, localData, offscreen, page, popup, send, sessionData, setNative, toasts } from "./fake-chrome.mjs";
 import { AWS, KEY, MAIL, realEngine, tick } from "./helpers.mjs";
 import { makePdf } from "./pdf-fixtures.mjs";
 import { EXT_ID } from "./fake-chrome.mjs";
@@ -117,12 +117,14 @@ test("the desktop app: link, policy and vault sync, app-first masking, event rep
   appEngine.mask("someone.else@acme-corp.io"); // the app already holds EMAIL_1 for a different value
   const appPolicy = { customTerms: ["Project Falcon"] };
   let appDown = false;
+  let hellos = 0;
   let port;
   setNative(() => {
     port = appPort(async (m) => {
       if (appDown) return { ok: false, error: "Zuko desktop app is not running" };
       switch (m.op) {
         case "hello":
+          hellos += 1;
           return { ok: true, app: "zuko", version: "1.2.3" };
         case "policy":
           return { ok: true, detector: appPolicy };
@@ -146,6 +148,15 @@ test("the desktop app: link, policy and vault sync, app-first masking, event rep
   let s = await send({ type: "status" }, popup);
   assert.equal(s.linked, true);
   assert.equal(s.appVersion, "1.2.3");
+
+  // The heartbeat alarm exists (every 30 s) and, while linked, each beat is a hello: the app
+  // shows the extension as connected only while it keeps hearing from it.
+  assert.equal(alarms.get("zuko-heartbeat")?.periodInMinutes, 0.5);
+  const before = hellos;
+  fireAlarm("zuko-heartbeat");
+  await tick(20);
+  assert.equal(hellos, before + 1);
+  assert.equal((await send({ type: "status" }, popup)).linked, true);
 
   // Vault merge: the app keeps EMAIL_1; our own email moved to a free number.
   const keys = (await send({ type: "known" }, page)).keys.sort();

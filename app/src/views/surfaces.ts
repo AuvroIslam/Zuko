@@ -76,7 +76,8 @@ function claudeCard(task: AgentTask, p: ProtectionStatus | null, actions: ViewAc
   return h(
     "div",
     { class: "sf-card" },
-    head(task.color, task.name, "Agent firewall"),
+    // The counters are today's (back to 0 at midnight); three "… today" labels do not fit.
+    head(task.color, task.name, "Firewall · today"),
     line,
     tiles(
       [p?.askedTotal ?? 0, "asked", AMBER],
@@ -104,7 +105,7 @@ function gatewayCard(task: AgentTask, p: ProtectionStatus | null, actions: ViewA
     head(task.color, task.name, "Privacy proxy"),
     line,
     tiles(
-      [p?.maskedTotal ?? 0, "masked", "#2DD4BF"],
+      [p?.maskedTotal ?? 0, "masked today", "#2DD4BF"],
       [p?.vaultSize ?? 0, "in vault"],
     ),
     links([p?.gatewayConfigured ? "Settings…" : "Turn on…", () => actions.openSettingsWindow()]),
@@ -136,7 +137,7 @@ function policyCard(task: AgentTask, p: ProtectionStatus | null, actions: ViewAc
   return h(
     "div",
     { class: "sf-card" },
-    head(task.color, task.name, monitor ? "Monitor mode" : "Enforced"),
+    head(task.color, task.name, monitor ? "Monitor mode · today" : "Enforced · today"),
     tiles(
       [p?.blockedTotal ?? 0, monitor ? "would block" : "blocked", RED],
       [p?.askedTotal ?? 0, "asked", AMBER],

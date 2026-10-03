@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use zuko_core::audit::{sha256_hex, Receipt};
 
-use crate::engine::{self, Engine, Stats};
+use crate::engine::{self, Engine};
 use crate::events::{self, ActivityItem, PrivacyEvent};
 
 pub enum Host {
@@ -91,11 +91,10 @@ impl Host {
         }
     }
 
-    /// Counts the masking and tells the UI (privacy toast, activity feed) and the
-    /// audit log.
+    /// Tells the UI (privacy toast, activity feed) and the audit log, whose receipt counts
+    /// the masked values for today; then the protection status follows (throttled).
     pub fn masked(&self, r: &MaskedReport) {
         let Some(engine) = self.engine() else { return };
-        Stats::add(&engine.stats.masked, r.count as u64);
         let Host::App(app) = self else { return };
 
         let session_id = r.session_id.clone().unwrap_or_default();
@@ -143,6 +142,7 @@ impl Host {
             policy_digest: engine.policy().digest(),
             ..Default::default()
         });
+        events::protection_changed_soon(app);
     }
 
     /// A local-AI deep scan taught the vault new values (keys and labels only).

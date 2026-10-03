@@ -90,13 +90,25 @@ export const Bridge = {
 
   reposition: () => call<void>("reposition"),
 
+  /**
+   * Dragging the island along the top edge. `dx`: logical pixels the pointer moved since
+   * the press (from `screenX`, which does not move with the window). "end" saves the place.
+   */
+  islandDrag: (phase: "start" | "move" | "end", dx: number) => call<void>("island_drag", { phase, dx }),
+  /** Back to the top centre (Settings → General, or a double-click on the island's header). */
+  resetIslandPosition: () => call<void>("reset_island_position"),
+
   openUrl: (url: string) => call<void>("open_url", { url }),
 
   /** "Open terminal" → opens the folder in VS Code when `code` is on PATH. */
   openInVSCode: (path: string | null) => call<boolean>("open_in_vscode", { path }),
 
-  /** "Open file" on an activity row: VS Code (`code --goto`) or the file's folder. False when it did not open in VS Code. */
-  openFile: (path: string) => call<boolean>("open_file", { path }),
+  /**
+   * "Open file" on an activity row: VS Code, in the window that has the session folder
+   * `cwd` open (`code <cwd> --goto <path>`), or the file's folder in Explorer. False when
+   * it did not open in VS Code.
+   */
+  openFile: (path: string, cwd?: string | null) => call<boolean>("open_file", { path, cwd: cwd ?? null }),
 
   quit: () => call<void>("quit_app"),
 
@@ -170,6 +182,12 @@ export const Bridge = {
   vaultInsights: (key: string) => callOrThrow<VaultInsight[] | null>("vault_insights", { key }),
   /** Copies the value to the clipboard on the Rust side (it never reaches the webview) and clears it after 30 s if unchanged. False if the key is gone. */
   vaultCopy: (key: string) => callOrThrow<boolean>("vault_copy", { key }),
+
+  // ── Browser bridge (the extension's native messaging host) ────────────────
+  /** Is `app.zuko.host` registered for this user's browsers. */
+  nativeHostStatus: () => call<NativeHostStatus>("native_host_status"),
+  /** Register (true) or unregister (false) the host; the choice sticks across launches. Explicit clicks only. */
+  nativeHostSet: (enabled: boolean) => callOrThrow<NativeHostStatus>("native_host_set", { enabled }),
 
   // ── Activity and audit ────────────────────────────────────────────────────
   /** Newest first. */
@@ -307,16 +325,47 @@ export interface ProtectionStatus {
   denyRulesInstalled: boolean;
   mode: PolicyMode;
   vaultSize: number;
-  /** Values masked since launch. */
+  // The four totals are today's (local date, back to 0 at midnight), counted from the
+  // audit log, so they survive a restart and match the activity feed's filters.
+  /** Values masked today (each masking counts the distinct values it replaced). */
   maskedTotal: number;
-  /** Actions denied since launch. */
+  /** Actions denied (policy or human) and prompts held back today. */
   blockedTotal: number;
+  /** Actions Zuko asked about today. */
   askedTotal: number;
+  /** Low-risk actions allowed without asking today. */
   autoAllowedTotal: number;
-  /** A native-host connection was seen in the last 60 s. */
+  /** The browser extension was heard from in the last 60 s (it says hello every 25 s while linked). */
   extensionConnected: boolean;
   policyPath: string;
   auditPath: string;
+}
+
+/** One browser that can start the native host. */
+export interface NativeHostBrowser {
+  /** "Chrome" | "Edge" | "Chromium" | "Brave" */
+  name: string;
+  /** The browser has settings for this user. */
+  installed: boolean;
+  /** It points at Zuko's host manifest. */
+  registered: boolean;
+}
+
+/** The browser bridge: `app.zuko.host` registered for the current user. */
+export interface NativeHostStatus {
+  /** The manifest is right and every browser that should know the host does. */
+  registered: boolean;
+  /** Zuko registers it at every launch (`Settings.browserBridge`). */
+  enabled: boolean;
+  browsers: NativeHostBrowser[];
+  /** `%LOCALAPPDATA%\Zuko\native-host\app.zuko.host.json` */
+  manifestPath: string;
+  /** The installed native host the manifest points at. */
+  hostPath: string;
+  hostPresent: boolean;
+  extensionId: string;
+  /** Why the last register / unregister failed. */
+  error: string | null;
 }
 
 export type ActivityVerdict =
@@ -349,6 +398,8 @@ export interface ActivityItem {
   aiExplanation?: string;
   /** Absolute path of the file a Write/Edit/MultiEdit/NotebookEdit call targets ("Open file"). Live items only. */
   path?: string;
+  /** The session's working folder, next to `path`: "Open file" opens the file in the VS Code window that has it open. */
+  cwd?: string;
 }
 
 /** One non-sensitive fact about a vault value (never the value itself). */
@@ -610,6 +661,8 @@ export interface EventMap {
   tray: string;
   hook: HookEventPayload;
   "screen-changed": null;
+  /** The settings window got the focus (island only): fold away unless a card is waiting. */
+  "settings-focused": null;
   "settings-changed": Settings;
   activity: ActivityItem;
   privacy: PrivacyEvent;

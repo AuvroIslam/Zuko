@@ -31,6 +31,19 @@ pub struct Settings {
     /// The Ollama model for the chat (independent of the local AI's scan model).
     #[serde(default = "default_ollama_model")]
     pub ollama_model: String,
+    /// The browser bridge: Zuko registers the extension's native messaging host for this
+    /// user at every launch (nativehost.rs). Off once the user unregisters it in Settings →
+    /// Browser, so it is not quietly put back.
+    #[serde(default = "default_true")]
+    pub browser_bridge: bool,
+    /// Where the island sits along the top edge: its centre's distance from the display's
+    /// centre, as a fraction of the display's width (0 = centred, negative = left). Set by
+    /// dragging the island (island.rs clamps it to the display); absent in older files.
+    pub island_offset: f64,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_model() -> String {
@@ -74,6 +87,8 @@ impl Default for Settings {
             model: default_model(),
             openai_model: default_openai_model(),
             ollama_model: default_ollama_model(),
+            browser_bridge: true,
+            island_offset: 0.0,
         }
     }
 }
@@ -164,6 +179,10 @@ mod tests {
         assert_eq!(old.chat_model(Provider::Anthropic), "claude-sonnet-5");
         assert_eq!(old.chat_model(Provider::OpenAi), Provider::OpenAi.default_model());
         assert_eq!(old.chat_model(Provider::Ollama), "gemma3:4b");
+        assert!(old.browser_bridge, "the browser bridge is on unless turned off");
+        assert_eq!(old.island_offset, 0.0, "the island starts centred");
+        let moved: Settings = serde_json::from_str(r#"{"islandOffset":-0.25}"#).unwrap();
+        assert_eq!(moved.island_offset, -0.25);
 
         // The new fields round-trip.
         let mut s = Settings { chat_provider: Provider::OpenAi, openai_model: "gpt-4.1".into(), ..Settings::default() };

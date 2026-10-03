@@ -51,10 +51,15 @@ Existing Coucou commands keep their names (`boot`, `save_settings`, `set_collaps
 `secret_present`, `secret_set`, `secret_clear`, `open_settings_window`). Removed:
 `refresh_integration`, `open_n8n`.
 
+`save_settings` never changes `islandOffset` (a window that has not heard of the last drag
+must not move the island back); only the two commands below do.
+
 New commands (JS argument names are camelCase):
 
 | Command | Args | Returns |
 |---|---|---|
+| `island_drag` | `phase: "start" \| "move" \| "end", dx: number` | `void` (the island follows a press-and-drag on its header or empty area: `dx` = logical px the pointer moved since the press, from `screenX`; Rust moves the window along the top edge, clamped to the display; "end" saves `Settings.islandOffset` and emits `settings-changed`) |
+| `reset_island_position` | — | `void` (back to the top centre; saved, `settings-changed`) |
 | `protection_status` | — | `ProtectionStatus` |
 | `protection_preview` | `options: InstallOptions` | `HookPreview` (same shape as `hooks_preview`) |
 | `protection_apply` | `options: InstallOptions, fingerprint: string` | `string` (backup path) |
@@ -68,7 +73,9 @@ New commands (JS argument names are camelCase):
 | `vault_reveal` | `key: string` | `string \| null` (explicit user click only) |
 | `vault_insights` | `key: string` | `{ label: string, text: string }[] \| null` (local, non-sensitive facts: never the value or more than its last four digits; display only) |
 | `vault_copy` | `key: string` | `boolean` (explicit click only; the Rust side copies the value to the clipboard, so it never reaches the webview, and clears it after 30 s only if the clipboard still holds it; audit receipt event `VaultCopy`, keys only) |
-| `open_file` | `path: string` | `boolean` (existing absolute file only; `code --goto <path>` when VS Code is on PATH, else shows the folder; true when VS Code opened it) |
+| `open_file` | `path: string, cwd: string \| null` | `boolean` (existing absolute file only. VS Code on PATH: `code <cwd> --goto <path>` when `cwd` is an existing absolute folder that contains the file, so the window already running that session gets it; otherwise `code --reuse-window --goto <path>`. Each value its own argument, no shell. Without VS Code: shows the folder. True when VS Code opened it) |
+| `native_host_status` | — | `NativeHostStatus` (the browser bridge: is `app.zuko.host` registered for this user) |
+| `native_host_set` | `enabled: boolean` | `NativeHostStatus` (explicit click only: registers or unregisters now and stores `Settings.browserBridge`, so an unregistered bridge stays off across launches; audited; a failure comes back in `error`) |
 | `activity_recent` | `limit: number` | `ActivityItem[]` (newest first) |
 | `audit_verify` | — | `{ ok: boolean, count: number, error: string \| null }` |
 | `audit_open_folder` | — | `void` |
@@ -117,11 +124,15 @@ interface ProtectionStatus {
   denyRulesInstalled: boolean;
   mode: "enforce" | "monitor";
   vaultSize: number;
-  maskedTotal: number;         // values masked since launch
-  blockedTotal: number;        // actions denied since launch
-  askedTotal: number;
-  autoAllowedTotal: number;
-  extensionConnected: boolean; // a native-host connection was seen in the last 60 s
+  // The four totals are TODAY's (local date; they start again at 0 at midnight). The audit
+  // log counts every receipt as it is written and, at startup, today's receipts already in
+  // the log, so a restart keeps them. Groups follow the activity feed's filters:
+  maskedTotal: number;         // values masked today: each "masked" receipt counts its distinct keys
+                               // (a browser report without known keys: the count it reported)
+  blockedTotal: number;        // denied by policy (deny), by a human (denied_by_user), prompts held back (blocked_prompt)
+  askedTotal: number;          // PreToolUse "ask"
+  autoAllowedTotal: number;    // PreToolUse "allow"
+  extensionConnected: boolean; // the extension was heard from in the last 60 s (it says hello every 25 s while linked)
   policyPath: string;
   auditPath: string;
 }
@@ -142,6 +153,7 @@ interface ActivityItem {
   keys: string[];        // vault keys involved
   aiExplanation?: string; // local AI text, attached when `ai-explain` arrives (display only)
   path?: string;         // absolute file path of a Write/Edit/MultiEdit/NotebookEdit call ("Open file"); live items only, never file contents
+  cwd?: string;          // the session's absolute working folder, only next to `path` (passed to open_file)
 }
 
 interface SanitizeResult {
@@ -208,6 +220,26 @@ interface ChatSettings {
                                // used whether or not localAi.enabled is on
 }
 
+// Settings (settings.json), serde defaults, so older files load unchanged.
+interface PlacementAndBridgeSettings {
+  browserBridge: boolean;  // default true: Zuko registers the browser bridge at launch
+  islandOffset: number;    // default 0: the island centre's distance from the display centre, as a
+                           // fraction of the display width (negative = left); clamped to the display
+                           // when applied (launch, display change, drag), shared by the wake strip
+}
+
+// The browser bridge (native messaging host `app.zuko.host`, HKCU / ~/.config only).
+interface NativeHostStatus {
+  registered: boolean;     // the manifest is right and every browser that should know the host does
+  enabled: boolean;        // Settings.browserBridge
+  browsers: { name: string; installed: boolean; registered: boolean }[];  // Chrome, Edge, Chromium, Brave
+  manifestPath: string;    // <local data>\native-host\app.zuko.host.json
+  hostPath: string;        // the installed zuko-native-host the manifest points at
+  hostPresent: boolean;
+  extensionId: string;     // cbdnjagdcfchakoejiahgeclappplcba, the only allowed origin
+  error: string | null;    // why the last register / unregister failed
+}
+
 interface ChatReply {
   text: string;                               // placeholders restored on this machine
   masked: { key: string; label: string }[];   // what was masked in this turn (never values)
@@ -249,8 +281,9 @@ was shown, labels are Zuko's own, and failures fall back to the deterministic re
 | `hook` | island | the hook payload (UI copy: strings truncated to 2000 chars) + `request_id` for PermissionRequest + **`zuko`** (below) |
 | `activity` | all windows | `ActivityItem` |
 | `privacy` | all windows | `PrivacyEvent` |
-| `protection-changed` | all windows | `ProtectionStatus` |
+| `protection-changed` | all windows | `ProtectionStatus` — after any change to what is protected, after decisions and maskings (throttled: at most 4 a second, the last change of a burst always followed by one), when the extension connects or falls silent, and at midnight |
 | `ai-explain` | all windows | `{ requestId: string \| null, activityId: string \| null, text: string, model: string }` — a local AI explanation for an approval card (`requestId`) or a feed item (`activityId`); display only, labelled "AI explanation" |
+| `settings-focused` | island | `null` — the settings window got the focus: the island folds back to compact unless an approval card is waiting. (When it is shown, the settings window is also moved below the island's current bottom on the island's display, within the work area, so the island never covers its title bar.) |
 | `settings-changed`, `tray`, `screen-changed`, `cursor` | unchanged | unchanged |
 
 The `zuko` object on `hook` payloads for `PreToolUse` and `PermissionRequest`:
@@ -287,6 +320,22 @@ Host manifest name: `app.zuko.host`. Chrome/Edge frame: 4-byte little-endian len
 UTF-8 JSON. The host forwards each message to the app over the same pipe as a request
 with `hook_event_name: "ZukoExtension"` and relays the app's reply.
 
+Registration: the app registers the host for the current user at every launch (unless
+`Settings.browserBridge` is off, or the data folder is redirected for development). It
+writes `<local data>\native-host\app.zuko.host.json` (`name`, `description`, `path` = the
+installed `bin\zuko-native-host.exe`, `type: "stdio"`, `allowed_origins:
+["chrome-extension://cbdnjagdcfchakoejiahgeclappplcba/"]`, identical to
+`extension/scripts/register-host.mjs`) and, on Windows, the default value of
+`HKCU\Software\Google\Chrome\NativeMessagingHosts\app.zuko.host` and
+`HKCU\Software\Microsoft\Edge\NativeMessagingHosts\app.zuko.host` (plus Chromium and
+Brave when installed) = that file's path; on Linux a copy of the manifest in each installed
+browser's `~/.config/<browser>/NativeMessagingHosts/`. Only what differs is written.
+
+Heartbeat: while linked the extension sends `{"op":"hello"}` every 25 s (a `chrome.alarms`
+alarm wakes a sleeping service worker every 30 s to reconnect when not linked). The app
+counts the extension as connected while it heard from it in the last 60 s and sends
+`protection-changed` when that flips.
+
 Extension → app messages (`{"op": …}`):
 - `{"op":"hello","version":…}` → `{"ok":true,"app":"zuko","version":…}`
 - `{"op":"mask","text":…,"site":…}` → `{"ok":true,"text":…,"report":MaskReport}`
@@ -317,4 +366,6 @@ Extension → app messages (`{"op": …}`):
 | `%LOCALAPPDATA%\Zuko\audit\audit.jsonl` | hash-chained `Receipt` lines |
 | `%LOCALAPPDATA%\Zuko\gateway.json` | `{ "port": n, "token": "…", "upstream": "https://api.anthropic.com" }` |
 | `%LOCALAPPDATA%\Zuko\bin\zuko-hook.exe` | relay |
+| `%LOCALAPPDATA%\Zuko\bin\zuko-native-host.exe` | the browser extension's native host |
+| `%LOCALAPPDATA%\Zuko\native-host\app.zuko.host.json` | its host manifest (section 4), named by `HKCU\Software\{Google\Chrome,Microsoft\Edge,…}\NativeMessagingHosts\app.zuko.host` |
 | `%LOCALAPPDATA%\Zuko\inbox\` | dropped files and sanitized copies |

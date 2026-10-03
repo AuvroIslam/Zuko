@@ -17,6 +17,7 @@ mod hooks;
 mod island;
 mod localai;
 mod log;
+mod nativehost;
 mod pipe;
 mod platform;
 mod policystore;
@@ -25,6 +26,7 @@ mod secrets;
 mod settings;
 mod tray;
 mod vaultstore;
+mod vscode;
 
 use std::process::Command;
 use std::sync::atomic::Ordering;
@@ -76,9 +78,12 @@ fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
 }
 
 #[tauri::command]
-fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
+fn save_settings(app: AppHandle, shared: State<Shared>, mut settings: Settings) {
     let (screen_changed, autostart_changed) = {
         let mut current = shared.settings.lock().unwrap();
+        // The island's place only changes through island_drag and reset_island_position:
+        // a window that has not heard of the last drag yet must not move it back.
+        settings.island_offset = current.island_offset;
         let screen_changed = current.screen != settings.screen;
         let autostart_changed = current.autostart != settings.autostart;
         *current = settings.clone();
@@ -96,9 +101,66 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     }
     if screen_changed {
         let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
-        island::apply_geometry(&app, &settings.screen, collapsed);
+        island::apply_geometry(&app, &settings.screen, collapsed, settings.island_offset);
     }
     // Keep the other window in step (island ⇄ settings window).
+    let _ = app.emit("settings-changed", settings);
+}
+
+/// The display preference and the island's place, as last saved.
+fn placement(shared: &Shared) -> (String, f64) {
+    let s = shared.settings.lock().unwrap();
+    (s.screen.clone(), s.island_offset)
+}
+
+/// Dragging the island along the top edge (island.ts). `dx` is how far the pointer has
+/// moved since the press, in logical pixels; the island follows it, clamped to the
+/// display. "start" marks where the drag began, "move" follows, "end" keeps the new
+/// place in settings and tells both windows.
+#[tauri::command]
+fn island_drag(app: AppHandle, shared: State<Shared>, phase: String, dx: f64) {
+    let (pref, current) = placement(&shared);
+    if phase == "start" {
+        *shared.gate.drag_from.lock().unwrap() = Some(current);
+        return;
+    }
+    // A move without its start (should not happen) starts the drag where the island is.
+    let from = *shared.gate.drag_from.lock().unwrap().get_or_insert(current);
+    let width = island::drag_monitor_width(&app, &pref);
+    let dx = if dx.is_finite() { dx } else { 0.0 };
+    let offset = island::clamp_offset(from + dx / width.max(1.0), width, island::PANEL_W);
+    let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
+    island::move_to(&app, &pref, collapsed, offset);
+    let updated = {
+        let mut s = shared.settings.lock().unwrap();
+        s.island_offset = offset;
+        s.clone()
+    };
+    if phase == "end" {
+        *shared.gate.drag_from.lock().unwrap() = None;
+        store_placement(&app, updated);
+    }
+}
+
+/// Settings → General → "Reset island position", and a double-click on the island's
+/// header: back to the top centre.
+#[tauri::command]
+fn reset_island_position(app: AppHandle, shared: State<Shared>) {
+    let (pref, _) = placement(&shared);
+    let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
+    island::apply_geometry(&app, &pref, collapsed, 0.0);
+    let updated = {
+        let mut s = shared.settings.lock().unwrap();
+        s.island_offset = 0.0;
+        s.clone()
+    };
+    store_placement(&app, updated);
+}
+
+fn store_placement(app: &AppHandle, settings: Settings) {
+    if let Err(err) = settings::save(&settings) {
+        log::line(format!("could not save the island's place: {err}"));
+    }
     let _ = app.emit("settings-changed", settings);
 }
 
@@ -106,9 +168,9 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
 /// cursor poll; anything else → full panel and 60 Hz polling.
 #[tauri::command]
 fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
-    let pref = shared.settings.lock().unwrap().screen.clone();
+    let (pref, offset) = placement(&shared);
     shared.gate.collapsed.store(collapsed, Ordering::Relaxed);
-    island::apply_geometry(&app, &pref, collapsed);
+    island::apply_geometry(&app, &pref, collapsed, offset);
     // The wake strip must always take the mouse, and a resize invalidates the flag.
     island::refresh_click_through(&app, &shared.gate);
     shared.gate.set_active(!collapsed);
@@ -133,11 +195,12 @@ fn focus_window(app: AppHandle, focused: bool) {
     }
 }
 
+/// After a display change: the same place on the (possibly new) display, clamped to it.
 #[tauri::command]
 fn reposition(app: AppHandle, shared: State<Shared>) {
-    let pref = shared.settings.lock().unwrap().screen.clone();
+    let (pref, offset) = placement(&shared);
     let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
-    island::apply_geometry(&app, &pref, collapsed);
+    island::apply_geometry(&app, &pref, collapsed, offset);
 }
 
 #[tauri::command]
@@ -182,19 +245,22 @@ fn open_in_vscode(path: Option<String>) -> bool {
 }
 
 /// "Open file" on an activity row: opens the file Claude just wrote or edited in VS Code
-/// (`code --goto <path>`) when `code` is on PATH, otherwise shows its folder in the file
-/// manager. Same rules as `open_in_vscode`: no shell, the path is its own argument, and
-/// only an existing file given by its full path gets this far (the path comes from a hook
-/// payload; xdg-open or a shell would run a file with whatever handles its type).
+/// when `code` is on PATH, otherwise shows its folder in the file manager. `cwd` is the
+/// session's working folder: handed to VS Code first (`code <cwd> --goto <path>`), it
+/// brings the file up in the window already running the task instead of a new one (see
+/// vscode.rs). Same rules as `open_in_vscode`: no shell, every path is its own argument,
+/// and only an existing file given by its full path gets this far (the path comes from a
+/// hook payload; xdg-open or a shell would run a file with whatever handles its type).
 #[tauri::command]
-fn open_file(path: String) -> bool {
+fn open_file(path: String, cwd: Option<String>) -> bool {
     let p = std::path::Path::new(&path);
     if !(p.is_absolute() && p.is_file()) {
         return false;
     }
     if let Some(code) = platform::find_on_path("code") {
+        let folder = vscode::project_folder(p, cwd.as_deref());
         let mut cmd = Command::new(code);
-        cmd.arg("--goto").arg(p);
+        cmd.args(vscode::open_file_args(p, folder.as_deref()));
         if platform::no_console(&mut cmd).spawn().is_ok() {
             return true;
         }
@@ -425,13 +491,20 @@ fn create_settings_window(app: &AppHandle) {
         .build()
     {
         Ok(win) => {
-            // Closing it must only hide it, or it could never be reopened.
             let hidden = win.clone();
-            win.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            let handle = app.clone();
+            win.on_window_event(move |event| match event {
+                // Closing it must only hide it, or it could never be reopened.
+                tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = hidden.hide();
                 }
+                // The island makes room: it folds back to compact unless an approval
+                // card is waiting (island.ts decides, it knows what is on screen).
+                tauri::WindowEvent::Focused(true) => {
+                    let _ = handle.emit_to(island::WINDOW_LABEL, "settings-focused", ());
+                }
+                _ => {}
             });
         }
         Err(err) => log::line(format!("settings window failed: {err}")),
@@ -444,9 +517,46 @@ pub fn show_settings_window(app: &AppHandle) {
         return;
     };
     let _ = win.unminimize();
+    keep_below_island(app, &win);
     let _ = win.show();
     let _ = win.set_focus();
     allow_file_drops(app);
+}
+
+/// Gap between the island's bottom edge and a window moved out from under it, and the
+/// shortest the settings window gets (its `min_inner_size`), in logical pixels.
+const BELOW_ISLAND_GAP: f64 = 12.0;
+const SETTINGS_MIN_H: f64 = 480.0;
+
+/// The island is always on top, so a settings window under it has its title bar
+/// (minimize, close) out of reach. Before it shows, a window that would sit under the
+/// island moves down below it, within the work area of the island's display, getting
+/// shorter if it must; one the user put elsewhere stays where it is.
+fn keep_below_island(app: &AppHandle, win: &tauri::WebviewWindow) {
+    let Some(shared) = app.try_state::<Shared>() else { return };
+    let Some((monitor, island)) = island::visible_bounds(app, &shared.gate) else { return };
+    let (Ok(pos), Ok(outer), Ok(inner)) = (win.outer_position(), win.outer_size(), win.inner_size()) else { return };
+    let scale = monitor.scale_factor();
+    let work = monitor.work_area();
+    let work = island::Rect { x: work.position.x, y: work.position.y, w: work.size.width, h: work.size.height };
+    // Only on the island's display.
+    let (cx, cy) = (pos.x + outer.width as i32 / 2, pos.y + outer.height as i32 / 2);
+    let (mp, ms) = (monitor.position(), monitor.size());
+    if !(cx >= mp.x && cx < mp.x + ms.width as i32 && cy >= mp.y && cy < mp.y + ms.height as i32) {
+        return;
+    }
+    let current = island::Rect { x: pos.x, y: pos.y, w: outer.width, h: outer.height };
+    let gap = (BELOW_ISLAND_GAP * scale).round() as i32;
+    let min_h = (SETTINGS_MIN_H * scale).round() as u32 + (outer.height.saturating_sub(inner.height));
+    let placed = island::place_below(current, island, work, gap, min_h);
+    if placed == current {
+        return;
+    }
+    if placed.h < current.h {
+        let shorter = inner.height.saturating_sub(current.h - placed.h);
+        let _ = win.set_size(tauri::PhysicalSize::new(inner.width, shorter));
+    }
+    let _ = win.set_position(tauri::PhysicalPosition::new(placed.x, placed.y));
 }
 
 /// The Documents drop zone needs dropped files to reach Tauri's drag events (the window
@@ -500,6 +610,8 @@ pub fn run() {
             save_settings,
             set_collapsed,
             set_island_rect,
+            island_drag,
+            reset_island_position,
             focus_window,
             reposition,
             open_url,
@@ -538,6 +650,8 @@ pub fn run() {
             commands::vault_reveal,
             commands::vault_insights,
             commands::vault_copy,
+            commands::native_host_status,
+            commands::native_host_set,
             commands::activity_recent,
             commands::audit_verify,
             commands::audit_open_folder,
@@ -556,7 +670,7 @@ pub fn run() {
 
             if let Some(win) = island::window(&handle) {
                 platform::make_non_activating(&win);
-                island::apply_geometry(&handle, &loaded.screen, false);
+                island::apply_geometry(&handle, &loaded.screen, false, loaded.island_offset);
                 let _ = win.show();
             }
             gate.collapsed.store(false, Ordering::Relaxed);
@@ -569,10 +683,14 @@ pub fn run() {
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
             log::line(format!("--- Zuko {} started ---", env!("CARGO_PKG_VERSION")));
-            // Resume the audit chain and seed the activity feed before the first event.
+            // Resume the audit chain, seed the activity feed and count today's receipts
+            // before the first event.
             auditlog::init();
+            events::spawn_status_watch(&handle);
             commands::register_hotkeys(&handle);
             hooks::ensure_hook_exe(&handle);
+            // After the native host is in place in bin\: the browsers are pointed at it.
+            nativehost::ensure_at_startup(loaded.browser_bridge);
             pipe::start(handle.clone());
             gateway::start(handle.clone());
             localai::warm_up(&handle);

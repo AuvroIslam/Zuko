@@ -27,4 +27,11 @@
   RMDir /r "$LOCALAPPDATA\Zuko\bin"
   RMDir /r "$LOCALAPPDATA\Zuko\inbox"
   Delete "$LOCALAPPDATA\Zuko\zuko.log"
+  ; The browser bridge the app registered for this user (nativehost.rs): only Zuko's own
+  ; host name under each browser's NativeMessagingHosts key, and its manifest.
+  DeleteRegKey HKCU "Software\Google\Chrome\NativeMessagingHosts\app.zuko.host"
+  DeleteRegKey HKCU "Software\Microsoft\Edge\NativeMessagingHosts\app.zuko.host"
+  DeleteRegKey HKCU "Software\Chromium\NativeMessagingHosts\app.zuko.host"
+  DeleteRegKey HKCU "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\app.zuko.host"
+  RMDir /r "$LOCALAPPDATA\Zuko\native-host"
 !macroend
