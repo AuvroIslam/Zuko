@@ -7,12 +7,15 @@
 // Island scenes: `index.html?mock=1&scene=<name>`, see SCENES below.
 
 import type {
-  ActivityItem, AuditVerifyResult, VaultInsight, BootInfo, BridgeEventName, EntryView, EventMap, HookPreview,
-  HookStatus, InstallOptions, LocalAiConfig, LocalAiStatus, LocalAiTest, MaskTextResult, Policy,
-  PrivacyEvent, ProtectionStatus, SanitizeResult, Tier, UnmaskTextResult, ZukoHookInfo,
+  ActivityItem, AuditVerifyResult, VaultInsight, BootInfo, BridgeEventName, ChatModels, ChatReply, ChatStatus,
+  EntryView, EventMap, HookPreview, HookStatus, InstallOptions, LocalAiConfig, LocalAiStatus, LocalAiTest,
+  MaskTextResult, Policy, PrivacyEvent, ProtectionStatus, SanitizeResult, Tier, UnmaskTextResult, ZukoHookInfo,
 } from "../src/core/bridge";
 import type { Island } from "../src/island/island";
-import { DEFAULT_SETTINGS, GATEWAY_ID, POLICY_ID, State } from "../src/core/state";
+import {
+  CHAT_PROVIDERS, CHAT_PROVIDER_LABEL, DEFAULT_SETTINGS, GATEWAY_ID, POLICY_ID, State, chatModel,
+  type ChatProvider, type Settings,
+} from "../src/core/state";
 
 // ── Fake data ─────────────────────────────────────────────────────────────────
 
@@ -168,6 +171,80 @@ const settingsDiff = `--- ${HOME}\\.claude\\settings.json
    }
  }`;
 
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+/** `&provider=openai|ollama` picks the chat provider at boot (screenshots). */
+const bootProvider = ((): ChatProvider => {
+  const p = new URLSearchParams(window.location.search).get("provider") as ChatProvider | null;
+  return p && CHAT_PROVIDERS.includes(p) ? p : "anthropic";
+})();
+
+let mockSettings: Settings = { ...DEFAULT_SETTINGS, hooksInstalled: true, chatProvider: bootProvider };
+
+/** Keys "in the keyring". Values are never handed back, as in Rust. */
+const storedKeys = new Set(["anthropic-api-key", "openai-api-key"]);
+
+/** What GET /v1/models would offer after Rust's chat-model filter, sorted. */
+const OPENAI_MODELS = ["chatgpt-4o-latest", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini", "o3", "o4-mini"];
+/** Installed in the fake Ollama. */
+const OLLAMA_MODELS = ["gemma3:4b", "llama3.2:3b", "qwen2.5:7b"];
+
+const loopback = (endpoint: string) => /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\/?$/i.test(endpoint.trim());
+
+function chatModels(provider: ChatProvider): ChatModels {
+  const saved = chatModel(mockSettings, provider);
+  switch (provider) {
+    case "anthropic":
+      return { provider, models: ["claude-haiku-4-5", "claude-opus-5", "claude-sonnet-5"], selected: saved, error: null };
+    case "openai":
+      if (!storedKeys.has("openai-api-key")) {
+        return { provider, models: [], selected: saved, error: "OpenAI API key missing. Add it in Settings → Chat." };
+      }
+      return { provider, models: OPENAI_MODELS, selected: OPENAI_MODELS.includes(saved) ? saved : "gpt-5-mini", error: null };
+    case "ollama": {
+      const ok = loopback(policy.localAi.endpoint);
+      return {
+        provider, models: ok ? OLLAMA_MODELS : [], selected: saved,
+        error: ok ? null : "Local AI endpoint must be http://127.0.0.1, http://localhost or http://[::1].",
+      };
+    }
+  }
+}
+
+function chatStatus(provider: ChatProvider): ChatStatus {
+  const model = chatModel(mockSettings, provider);
+  const base: ChatStatus = {
+    provider, label: CHAT_PROVIDER_LABEL[provider], model, cloud: provider !== "ollama", ready: false,
+    keyPresent: null, endpoint: null, reachable: null, modelPresent: null, error: null, hint: null,
+  };
+  if (provider !== "ollama") {
+    const present = storedKeys.has(`${provider}-api-key`);
+    return {
+      ...base, keyPresent: present, ready: present,
+      error: present ? null : `No ${CHAT_PROVIDER_LABEL[provider]} API key stored yet.`,
+      hint: present ? null : "Paste your key below and press Save key.",
+    };
+  }
+  const endpoint = policy.localAi.endpoint;
+  const reachable = loopback(endpoint);
+  const present = reachable && OLLAMA_MODELS.includes(model);
+  return {
+    ...base, endpoint, reachable, modelPresent: present, ready: present,
+    error: !reachable ? "Local AI endpoint must be http://127.0.0.1, http://localhost or http://[::1]." : present ? null : `The model ${model} is not installed.`,
+    hint: reachable && !present ? `ollama pull ${model}` : null,
+  };
+}
+
+function chatSend(query: string): ChatReply {
+  const masked = maskDemo(query);
+  const p = mockSettings.chatProvider;
+  const where = p === "ollama" ? "on this PC" : `after masking ${masked.report.count} value(s)`;
+  return {
+    text: `(${CHAT_PROVIDER_LABEL[p]} · ${chatModel(mockSettings)}, ${where}) Here is what I'd do: keep the key in .env and load it from the environment.`,
+    masked: masked.report.keys.map((key) => ({ key, label: vault.find((v) => v.key === key)?.label ?? key })),
+  };
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 const delay = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -219,7 +296,7 @@ function unmaskDemo(text: string): UnmaskTextResult {
 
 const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
   boot: (): BootInfo => ({
-    settings: { ...DEFAULT_SETTINGS, hooksInstalled: true },
+    settings: { ...mockSettings },
     screen: { x: 0, y: 0, width: 1920, height: 1080, scale: 1 },
     version: "0.1.1",
     hookPath: `${HOME}\\AppData\\Local\\Zuko\\bin\\zuko-hook.exe`,
@@ -231,7 +308,20 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     hookPath: `${HOME}\\AppData\\Local\\Zuko\\bin\\zuko-hook.exe`,
     hookReady: true,
   }),
-  secret_present: (a) => a.key === "anthropic-api-key",
+  save_settings: (a) => {
+    mockSettings = { ...(a.settings as Settings) };
+    emit("settings-changed", { ...mockSettings });
+  },
+  secret_present: (a) => storedKeys.has(String(a.key)),
+  secret_set: (a) => {
+    if (!["anthropic-api-key", "openai-api-key"].includes(String(a.key))) throw `unknown key ${a.key}`;
+    if (String(a.value)) storedKeys.add(String(a.key));
+    else storedKeys.delete(String(a.key));
+  },
+  secret_clear: (a) => void storedKeys.delete(String(a.key)),
+  chat_models: (a) => chatModels(a.provider as ChatProvider),
+  chat_status: (a) => chatStatus((a.provider as ChatProvider | null) ?? mockSettings.chatProvider),
+  chat_send: (a) => chatSend(String(a.query)),
   protection_status: () => ({ ...status }),
   protection_preview: (a): HookPreview => {
     const o = a.options as InstallOptions;
@@ -366,7 +456,14 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
 };
 
 export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
-  await delay(cmd === "sanitize_file" ? 450 : cmd === "audit_verify" ? 600 : cmd === "localai_test" ? 900 : 25);
+  await delay(
+    cmd === "sanitize_file" ? 450
+      : cmd === "audit_verify" ? 600
+      : cmd === "localai_test" ? 900
+      : cmd === "chat_send" ? 700
+      : cmd === "chat_models" && args.provider === "openai" ? 300
+      : 25,
+  );
   const fn = handlers[cmd];
   if (!fn) return null as T; // window plumbing: set_island_rect, focus_window…
   return fn(args) as T;
@@ -601,6 +698,15 @@ const SCENES: Record<string, (island: Island) => void> = {
   settings: (island) => {
     State.isPinned = true;
     island.alert("settings");
+  },
+  // The island chat with its provider header (`&provider=openai|ollama` to switch).
+  chat: (island) => {
+    State.isPinned = true;
+    State.chatHistory = [
+      { id: 1, role: "user", content: "Where should the Stripe key go in this repo?" },
+      { id: 2, role: "assistant", content: "Put it in .env as STRIPE_SECRET_KEY and read it with process.env; .env is already in .gitignore." },
+    ];
+    island.alert("prompt");
   },
   "hold-demo": () => {
     permissionRequest("high");

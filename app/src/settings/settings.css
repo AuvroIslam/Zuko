@@ -1017,3 +1017,26 @@ ol.steps button.small {
   padding: 3px 9px;
   font-size: 11px;
 }
+
+/* Chat: one block per provider, the chosen one marked "In use". */
+.chat-provider {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-provider .subhead {
+  align-items: center;
+}
+
+.chat-provider .subhead h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-key {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
