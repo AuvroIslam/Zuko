@@ -44,6 +44,16 @@ declare namespace chrome {
       addListener(cb: (changes: Record<string, { oldValue?: any; newValue?: any }>, area: string) => void): void;
     };
   }
+  namespace alarms {
+    interface Alarm {
+      name: string;
+      scheduledTime: number;
+      periodInMinutes?: number;
+    }
+    function create(name: string, info: { periodInMinutes?: number; delayInMinutes?: number }): Promise<void>;
+    function get(name: string): Promise<Alarm | undefined>;
+    const onAlarm: { addListener(cb: (alarm: Alarm) => void): void };
+  }
   namespace offscreen {
     function createDocument(params: { url: string; reasons: string[]; justification: string }): Promise<void>;
   }

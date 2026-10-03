@@ -35,7 +35,7 @@ cargo build -p zuko-core --target wasm32-unknown-unknown --release
 cd ..\extension
 npm install
 npm run build        # -> extension/dist  (add -- --min to minify our own code)
-npm test             # typecheck + 128 tests against the real WASM engine
+npm test             # typecheck + 141 tests against the real WASM engine
 ```
 
 `npm run build` copies `app/target/wasm32-unknown-unknown/release/zuko_core.wasm` into `dist/`. If it is
@@ -56,6 +56,23 @@ After rebuilding, press the reload button on the extension card and reload open 
 The extension talks to the Zuko desktop app through the native messaging host `app.zuko.host`
 (`app/native-host`, a small Rust binary: Chrome frames on stdio, one JSON line on `\\.\pipe\zuko-<SID>`).
 
+**The desktop app registers the host itself.** At every launch it writes
+`%LOCALAPPDATA%\Zuko\native-host\app.zuko.host.json` (pointing at the copy of the host it installs in
+`%LOCALAPPDATA%\Zuko\bin`, the only place it accepts extension messages from) and the default value of
+`HKCU\Software\Google\Chrome\NativeMessagingHosts\app.zuko.host` and
+`HKCU\Software\Microsoft\Edge\NativeMessagingHosts\app.zuko.host` (plus Chromium and Brave when they are
+installed): current user only, no admin rights, and only when something differs. Settings → Browser in the
+app shows "Browser bridge: registered for Chrome and Edge" with an Unregister / Register button. After the
+first registration, **reload the extension once** (`chrome://extensions` or `edge://extensions`, the reload
+arrow on the Zuko card) so it connects at once; otherwise it finds the app by itself within 30 seconds.
+
+How the link stays up: while linked, the extension says `hello` every 25 s, and the app shows it as
+connected while it heard from it in the last minute. While not linked, an alarm wakes the service worker
+every 30 s to try again, so starting the app after the browser needs no clicks. If the app closes, the next
+heartbeat drops the link (masking carries on locally) and the next alarm re-links and re-syncs.
+
+For development, or to register a build output instead of the installed host, the script still works:
+
 ```powershell
 cd app
 cargo build --release -p zuko-native-host      # -> app\target\release\zuko-native-host.exe
@@ -66,13 +83,15 @@ node scripts/register-host.mjs --uninstall --apply   # remove again
 ```
 
 Without `--apply` the script only writes `%LOCALAPPDATA%\Zuko\native-host\app.zuko.host.json` (override
-with `--out`) and **prints** the two `reg add` commands. The host manifest allows exactly one origin,
-this extension. Start the Zuko app, then the popup shows **Desktop app: linked**. When linked:
+with `--out`) and **prints** the two `reg add` commands. Note that the app rewrites the registration to the
+installed host at its next launch (turn the bridge off in Settings → Browser to keep yours). The host
+manifest allows exactly one origin, this extension. Start the Zuko app, then the popup shows
+**Desktop app: linked**. When linked:
 
 * new values are masked by the app (one vault shared with Claude Code); the extension keeps a copy in
   `chrome.storage.session` (memory only, never on disk) so it keeps working if the app closes;
 * the app's detector settings (custom terms, allowlist, ...) are applied;
-* blocks and uploads appear in the app's activity feed.
+* maskings, blocks and uploads appear in the app's activity feed and on its "today" counters.
 
 If the app is closed or the host is not registered, Zuko works alone with its own session vault.
 Values masked while the app was closed stay in the extension's session vault; when the app comes back its

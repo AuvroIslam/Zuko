@@ -17,6 +17,11 @@ export const messageListeners = [];
 export const changeListeners = [];
 export const toasts = [];
 export const appEvents = [];
+/** Alarms the service worker created, by name. */
+export const alarms = new Map();
+const alarmListeners = [];
+/** Fires an alarm the way Chrome does when its time comes. */
+export const fireAlarm = (name) => alarmListeners.forEach((l) => l({ name, scheduledTime: Date.now() }));
 let offscreenOpen = false;
 export const offscreen = {
   get open() {
@@ -128,6 +133,13 @@ globalThis.chrome = {
     createDocument: async () => {
       offscreenOpen = true;
     },
+  },
+  alarms: {
+    create: async (name, info) => {
+      alarms.set(name, { name, scheduledTime: Date.now(), ...info });
+    },
+    get: async (name) => alarms.get(name),
+    onAlarm: { addListener: (l) => alarmListeners.push(l) },
   },
   tabs: {
     sendMessage: async (tabId, msg, opts) => {

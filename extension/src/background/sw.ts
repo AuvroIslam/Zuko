@@ -275,3 +275,25 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.runtime.onStartup.addListener(() => void ready);
 chrome.runtime.onInstalled.addListener(() => void ready);
+
+// ---- heartbeat ------------------------------------------------------------------------------
+//
+// While linked, the open native port keeps this worker alive and NativeLink says hello every
+// 25 s, which is how the app knows the extension is there. While NOT linked the worker may be
+// asleep, so an alarm wakes it every 30 s (the shortest period Chrome allows) to try again: the
+// desktop app started after the browser, or the browser bridge was just registered, links
+// within half a minute without anyone touching the extension.
+
+const HEARTBEAT_ALARM = "zuko-heartbeat";
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== HEARTBEAT_ALARM) return;
+  void ready.then(() => link.tick()).then(() => publishSync());
+});
+// Created once; re-creating it on every wake-up would keep pushing the first beat back.
+void chrome.alarms
+  .get(HEARTBEAT_ALARM)
+  .then(async (existing) => {
+    if (!existing) await chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 0.5 });
+  })
+  .catch((e) => console.warn("[Zuko] heartbeat alarm unavailable:", e));
