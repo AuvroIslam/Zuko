@@ -19,6 +19,10 @@ async function main() {
   if (boot) {
     State.settings = { ...State.settings, ...boot.settings };
   }
+  // The island starts with the full panel (Island.collapsed is false). Rust starts it that
+  // way too, but a page reloaded while the island was hidden (a dev reload) would otherwise
+  // be drawn inside the 240×6 wake strip, with the cursor poll parked.
+  void Bridge.setCollapsed(false);
   island.applySettings();
   State.loadSurfaces();
   if (boot && !boot.cursorPoll) island.followPageCursor();

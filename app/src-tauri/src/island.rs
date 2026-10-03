@@ -69,19 +69,42 @@ impl IslandRect {
     }
 }
 
+/// A physical screen point in the window's logical coordinates (the page's CSS pixels,
+/// what `IslandRect` uses), for a window whose top-left corner is at `origin` on a display
+/// at `scale`. The cursor and the window position are both physical, so their difference
+/// is divided by the window's scale exactly once, whatever the display (100 %, 300 %).
+pub fn to_window_logical(point: (f64, f64), origin: (i32, i32), scale: f64) -> (f64, f64) {
+    let s = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    ((point.0 - origin.0 as f64) / s, (point.1 - origin.1 as f64) / s)
+}
+
+/// Whether the window takes the mouse with the cursor at `at` (window-logical) in a window
+/// `size` big (logical). The wake strip always does: it is the only way back to a hidden
+/// island, and nothing else is ever under it. The panel only over the island and its
+/// margin, or anywhere while the left button is held (a file being dragged has to find its
+/// drop target, see `spawn_cursor_poll`).
+pub fn takes_mouse(collapsed: bool, island: &IslandRect, at: (f64, f64), size: (f64, f64), button_down: bool) -> bool {
+    if collapsed {
+        return true;
+    }
+    let inside = at.0 >= 0.0 && at.0 <= size.0 && at.1 >= 0.0 && at.1 <= size.1;
+    island.takes(at.0, at.1) || (button_down && inside)
+}
+
 /// Wakes / parks the cursor poll thread so a hidden island costs literally nothing.
 pub struct PollGate {
     active: Mutex<bool>,
     cv: Condvar,
     pub collapsed: AtomicBool,
     pub rect: Mutex<IslandRect>,
-    /// Mirrors the window flag so we only call into the OS when it changes.
+    /// The click-through flag as last applied to the window, so the OS is only called
+    /// when it changes. Only `update_click_through` touches it, on the main thread, so it
+    /// always says what the window really has.
     ignoring: AtomicBool,
-    /// The island changed shape or the window was resized: the next tick decides
-    /// click-through again even if the cursor has not moved. Without it, a cursor
-    /// resting where the island just shrank away kept swallowing clicks meant for the
-    /// window behind until it moved, and one resting where the island just grew let
-    /// clicks fall through it.
+    /// The island changed shape: the next tick decides click-through again even if the
+    /// cursor has not moved. Without it, a cursor resting where the island just shrank
+    /// away kept swallowing clicks meant for the window behind until it moved, and one
+    /// resting where the island just grew let clicks fall through it.
     recheck: AtomicBool,
     /// `islandOffset` when the current drag began (see `lib.rs` `island_drag`).
     pub drag_from: Mutex<Option<f64>>,
@@ -108,10 +131,14 @@ impl PollGate {
         }
     }
 
-    /// Forces the next poll tick to re-apply the flag (after a window resize).
-    pub fn forget_ignore_state(&self) {
-        self.ignoring.store(false, Ordering::Relaxed);
-        self.recheck.store(true, Ordering::Relaxed);
+    /// The click-through flag the window needs now, with the cursor at `at` (window-logical)
+    /// in a window `size` big (logical): `Some` when it differs from the one last applied,
+    /// or when `force`d (the window was just resized or moved), and recorded as applied.
+    fn click_through_change(&self, at: (f64, f64), size: (f64, f64), button_down: bool, force: bool) -> Option<bool> {
+        let rect = *self.rect.lock().unwrap();
+        let ignore = !takes_mouse(self.collapsed.load(Ordering::Relaxed), &rect, at, size, button_down);
+        let before = self.ignoring.swap(ignore, Ordering::Relaxed);
+        (force || before != ignore).then_some(ignore)
     }
 
     pub fn set_active(&self, on: bool) {
@@ -190,6 +217,16 @@ pub fn clamp_offset(offset: f64, monitor_w: f64, panel_w: f64) -> f64 {
     offset.clamp(-max, max)
 }
 
+/// The island's place after a drag `dx` logical px long that began at `from`, on a display
+/// `width` logical px wide. The start is clamped to that display first, as it was drawn:
+/// a place saved on a wider display (or by hand) would otherwise swallow the first part of
+/// the drag, the island standing still until the pointer had made up the difference.
+pub fn drag_offset(from: f64, dx: f64, width: f64) -> f64 {
+    let width = width.max(1.0);
+    let dx = if dx.is_finite() { dx } else { 0.0 };
+    clamp_offset(clamp_offset(from, width, PANEL_W) + dx / width, width, PANEL_W)
+}
+
 /// The left edge (physical) of a window `window_w` wide centred on the island, on a
 /// display at `monitor_x` that is `monitor_w` wide. The island centre is clamped as if
 /// the window were the full panel (`panel_w`), so the panel and the wake strip always
@@ -201,28 +238,40 @@ pub fn window_x(monitor_x: i32, monitor_w: u32, panel_w: u32, window_w: u32, off
     monitor_x + left as i32
 }
 
+/// A logical length in physical pixels on a display at `scale`, at least one pixel.
+fn physical(logical: f64, scale: f64) -> u32 {
+    (logical * scale).round().max(1.0) as u32
+}
+
+/// Where the window goes (physical pixels) on a display at `monitor_pos`, `monitor_size`
+/// big, at `scale`: the panel, or the wake strip when `collapsed`, glued to the top edge,
+/// centred on the island's place `offset` (`Settings.islandOffset`).
+pub fn window_rect(monitor_pos: (i32, i32), monitor_size: (u32, u32), scale: f64, collapsed: bool, offset: f64) -> Rect {
+    let (lw, lh) = if collapsed { (STRIP_W, STRIP_H) } else { (PANEL_W, PANEL_H) };
+    let w = physical(lw, scale);
+    let x = window_x(monitor_pos.0, monitor_size.0, physical(PANEL_W, scale), w, offset);
+    Rect { x, y: monitor_pos.1, w, h: physical(lh, scale) }
+}
+
 /// Places and sizes the window. `collapsed` picks the wake strip instead of the panel;
-/// `offset` is `Settings.islandOffset`.
+/// `offset` is `Settings.islandOffset`. Click-through is decided again for the new shape
+/// straight away: the wake strip has to take the mouse the moment it exists.
 pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool, offset: f64) {
     let Some(win) = window(app) else { return };
-    let Some(m) = target_monitor(app, pref) else { return };
+    if let Some(m) = target_monitor(app, pref) {
+        let (mp, ms) = (*m.position(), *m.size());
+        let r = window_rect((mp.x, mp.y), (ms.width, ms.height), m.scale_factor(), collapsed, offset);
 
-    let scale = m.scale_factor();
-    let mp = *m.position();
-    let ms = *m.size();
+        let _ = win.set_size(PhysicalSize::new(r.w, r.h));
+        let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
+        // Moving across displays can rescale the window: re-assert the physical size.
+        let _ = win.set_size(PhysicalSize::new(r.w, r.h));
+        let _ = win.set_always_on_top(true);
+    }
 
-    let (lw, lh) = if collapsed { (STRIP_W, STRIP_H) } else { (PANEL_W, PANEL_H) };
-    let pw = (lw * scale).round().max(1.0) as u32;
-    let ph = (lh * scale).round().max(1.0) as u32;
-    let panel_w = (PANEL_W * scale).round().max(1.0) as u32;
-    let x = window_x(mp.x, ms.width, panel_w, pw, offset);
-    let y = mp.y;
-
-    let _ = win.set_size(PhysicalSize::new(pw, ph));
-    let _ = win.set_position(PhysicalPosition::new(x, y));
-    // Moving across displays can rescale the window: re-assert the physical size.
-    let _ = win.set_size(PhysicalSize::new(pw, ph));
-    let _ = win.set_always_on_top(true);
+    if let Some(shared) = app.try_state::<crate::Shared>() {
+        refresh_click_through(app, &shared.gate);
+    }
 }
 
 /// The display a drag happens on: the one the island is on now. (With "the display under
@@ -237,12 +286,9 @@ fn drag_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
 pub fn move_to(app: &AppHandle, pref: &str, collapsed: bool, offset: f64) {
     let Some(win) = window(app) else { return };
     let Some(m) = drag_monitor(app, pref) else { return };
-    let scale = m.scale_factor();
-    let lw = if collapsed { STRIP_W } else { PANEL_W };
-    let pw = (lw * scale).round().max(1.0) as u32;
-    let panel_w = (PANEL_W * scale).round().max(1.0) as u32;
-    let x = window_x(m.position().x, m.size().width, panel_w, pw, offset);
-    let _ = win.set_position(PhysicalPosition::new(x, m.position().y));
+    let (mp, ms) = (*m.position(), *m.size());
+    let r = window_rect((mp.x, mp.y), (ms.width, ms.height), m.scale_factor(), collapsed, offset);
+    let _ = win.set_position(PhysicalPosition::new(r.x, r.y));
 }
 
 /// Width in logical pixels (drag deltas arrive in those) of the display a drag is on.
@@ -322,8 +368,44 @@ fn current_screen_key(app: &AppHandle) -> Option<(i32, i32, u32, u32, u64)> {
     Some((p.x, p.y, size.width, size.height, m.scale_factor().to_bits()))
 }
 
+/// Decides click-through from the window, the island shape and the cursor as they are
+/// right now, applies it, and returns the cursor in window-logical coordinates (None when
+/// the OS will not say where it is). `force` re-applies the flag even if it looks
+/// unchanged (the window was just resized or moved).
+///
+/// Main thread only. The poll used to decide on its own thread and apply the flag with
+/// `set_ignore_cursor_events`, which from there is only queued for the main thread. A tick
+/// that was asleep while `set_collapsed` shrank the window to the wake strip then decided
+/// with the panel's island shape, found the cursor off it and made the strip click-through
+/// after `set_collapsed` had cleared the flag, and the poll parks while the island is
+/// hidden, so nothing ever cleared it again: a hidden island nobody could wake. Decided
+/// here, every decision sees the window as it is, in order with the commands that change
+/// it, and the wake strip always takes the mouse.
+fn update_click_through(app: &AppHandle, gate: &PollGate, force: bool) -> Option<(f64, f64)> {
+    let win = window(app)?;
+    let cursor = cursor_physical();
+    let (scale, at, size) = match (win.outer_position(), win.inner_size()) {
+        (Ok(origin), Ok(size)) => {
+            let scale = win.scale_factor().unwrap_or(1.0);
+            let at = cursor.map(|c| to_window_logical(c, (origin.x, origin.y), scale));
+            (scale, at, size)
+        }
+        _ => return None,
+    };
+    let size = (size.width as f64 / scale, size.height as f64 / scale);
+    // Nowhere (NaN) when the cursor is unknown: off the island, still on the wake strip.
+    let where_ = at.unwrap_or((f64::NAN, f64::NAN));
+    if let Some(ignore) = gate.click_through_change(where_, size, left_button_down(), force) {
+        let _ = win.set_ignore_cursor_events(ignore);
+    }
+    at
+}
+
 /// Emits `cursor` (window-logical coordinates) at ~60 Hz while the island is
 /// visible. Parked on a condvar the rest of the time.
+///
+/// This thread only watches the cursor: each move (or new island shape) hands one
+/// decision to the main thread (`update_click_through`), which also emits the event.
 pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
     std::thread::spawn(move || {
         let mut was_down = false;
@@ -336,6 +418,11 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
             let mut ticks: u32 = 0;
             while gate.is_active() {
                 std::thread::sleep(Duration::from_millis(16));
+                // The island hid while this thread slept: the window is the wake strip
+                // now, and its click-through is not the poll's business.
+                if !gate.is_active() {
+                    break;
+                }
 
                 // Monitors get plugged in, unplugged, rearranged and rescaled, and
                 // an island pinned to coordinates that no longer exist is an island
@@ -354,37 +441,21 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                     }
                 }
 
-                let Some(win) = window(&app) else { continue };
-                let Ok(origin) = win.outer_position() else { continue };
-                let scale = win.scale_factor().unwrap_or(1.0);
-                let Some((cx, cy)) = cursor_physical() else { continue };
-                let x = (cx - origin.x as f64) / scale;
-                let y = (cy - origin.y as f64) / scale;
-                let size = match win.inner_size() {
-                    Ok(s) => (s.width as f64 / scale, s.height as f64 / scale),
-                    Err(_) => (PANEL_W, PANEL_H),
-                };
-                // A still cursor needs no new decision, unless the island changed under it.
-                let recheck = gate.recheck.swap(false, Ordering::Relaxed);
-                if !recheck && (x - last.0).abs() < 1.0 && (y - last.1).abs() < 1.0 {
-                    continue;
-                }
-                last = (x, y);
+                let Some(cursor) = cursor_physical() else { continue };
 
                 // Click-through: the window only takes the mouse over the island
                 // shape. A small entry margin means the flag is already off by the
                 // time a moving cursor reaches a button.
-                let on_island = gate.rect.lock().unwrap().takes(x, y);
-
+                //
                 // A file being dragged has to be able to find us. WS_EX_TRANSPARENT
                 // — what click-through is on Windows — hides the window from
                 // WindowFromPoint, so OLE finds no drop target and shows the "no
                 // drop" cursor. macOS has no such problem: AppKit delivers drags to
                 // registered destinations whatever ignoresMouseEvents says. So while
                 // a button is held anywhere over the panel, the whole panel takes
-                // the mouse, which also makes the drop zone as forgiving as the Mac's.
-                // A press may be the start of a drag: make sure the drop target is
-                // ours before the file arrives.
+                // the mouse (`takes_mouse`), which also makes the drop zone as
+                // forgiving as the Mac's. A press may be the start of a drag: make
+                // sure the drop target is ours before the file arrives.
                 let down = left_button_down();
                 if down && !was_down {
                     let handle = app.clone();
@@ -392,19 +463,22 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                 }
                 was_down = down;
 
-                let dragging = down
-                    && x >= 0.0
-                    && x <= size.0
-                    && y >= 0.0
-                    && y <= size.1;
-
-                let accept = on_island || dragging;
-                if gate.ignoring.load(Ordering::Relaxed) == accept {
-                    gate.ignoring.store(!accept, Ordering::Relaxed);
-                    let _ = win.set_ignore_cursor_events(!accept);
+                // A still cursor needs no new decision, unless the island changed under
+                // it (a window moved or resized under it is decided when that happens,
+                // see `apply_geometry`).
+                let recheck = gate.recheck.swap(false, Ordering::Relaxed);
+                if !recheck && (cursor.0 - last.0).abs() < 1.0 && (cursor.1 - last.1).abs() < 1.0 {
+                    continue;
                 }
+                last = cursor;
 
-                let _ = win.emit("cursor", CursorPayload { x, y });
+                let (handle, g) = (app.clone(), gate.clone());
+                let _ = app.run_on_main_thread(move || {
+                    let Some((x, y)) = update_click_through(&handle, &g, false) else { return };
+                    if let Some(win) = window(&handle) {
+                        let _ = win.emit("cursor", CursorPayload { x, y });
+                    }
+                });
             }
         }
     });
@@ -412,13 +486,17 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
 
 /// Re-applies click-through after the window or the island changed shape.
 ///
-/// With the cursor poll (Windows) the window takes the mouse again and the next
-/// tick decides from the cursor. Without it (Linux) the input region is set to
-/// the island itself, or to the whole wake strip while collapsed.
-pub fn refresh_click_through(app: &AppHandle, gate: &PollGate) {
+/// With the cursor poll (Windows) it is decided again now, on the main thread, from the
+/// window as it now is (`update_click_through`): the wake strip takes the mouse, the
+/// panel only where the island is. Without it (Linux) the input region is set to the
+/// island itself, or to the whole wake strip while collapsed.
+pub fn refresh_click_through(app: &AppHandle, gate: &Arc<PollGate>) {
     if platform::CURSOR_POLL {
-        set_ignore_cursor(app, false);
-        gate.forget_ignore_state();
+        let (handle, g) = (app.clone(), gate.clone());
+        // Runs right here when called on the main thread (every command and `setup`).
+        let _ = app.run_on_main_thread(move || {
+            update_click_through(&handle, &g, true);
+        });
         return;
     }
     let Some(win) = window(app) else { return };
@@ -438,12 +516,6 @@ pub fn refresh_click_through(app: &AppHandle, gate: &PollGate) {
         }
     };
     platform::set_input_region(&win, region);
-}
-
-pub fn set_ignore_cursor(app: &AppHandle, ignore: bool) {
-    if let Some(win) = window(app) {
-        let _ = win.set_ignore_cursor_events(ignore);
-    }
 }
 
 #[cfg(test)]
@@ -479,9 +551,106 @@ mod tests {
         assert!(!gate.recheck.load(Ordering::Relaxed), "the same shape again changes nothing");
         gate.set_rect(IslandRect { h: 32.0, w: 288.0, x: 216.0, ..r });
         assert!(gate.recheck.load(Ordering::Relaxed));
-        gate.recheck.store(false, Ordering::Relaxed);
-        gate.forget_ignore_state();
-        assert!(gate.recheck.load(Ordering::Relaxed), "a resized window is rechecked too");
+    }
+
+    /// The user's displays: a laptop panel at 300 % (3456×2160) and a 1080p screen at
+    /// 100 % beside it, in both arrangements (either one primary, at x = 0).
+    const LAPTOP: ((i32, i32), (u32, u32), f64) = ((0, 0), (3456, 2160), 3.0);
+    const MONITOR_RIGHT: ((i32, i32), (u32, u32), f64) = ((3456, 0), (1920, 1080), 1.0);
+    const MONITOR_PRIMARY: ((i32, i32), (u32, u32), f64) = ((0, 0), (1920, 1080), 1.0);
+    const LAPTOP_LEFT: ((i32, i32), (u32, u32), f64) = ((-3456, 0), (3456, 2160), 3.0);
+
+    #[test]
+    fn the_cursor_is_converted_to_window_pixels_once_at_any_scale() {
+        // The panel centred on the 300 % laptop: 2160×960 physical, 720×320 logical.
+        let (pos, size, scale) = LAPTOP;
+        let panel = window_rect(pos, size, scale, false, 0.0);
+        assert_eq!(panel, Rect { x: 648, y: 0, w: 2160, h: 960 });
+        // The physical centre of the display's top edge is the panel's logical centre.
+        assert_eq!(to_window_logical((1728.0, 30.0), (panel.x, panel.y), scale), (360.0, 10.0));
+        // Same at 100 % on the screen to its right: physical is logical there.
+        let (pos, size, scale) = MONITOR_RIGHT;
+        let panel = window_rect(pos, size, scale, false, 0.0);
+        assert_eq!(panel, Rect { x: 3456 + 600, y: 0, w: 720, h: 320 });
+        assert_eq!(to_window_logical((3456.0 + 960.0, 10.0), (panel.x, panel.y), scale), (360.0, 10.0));
+        // A display left of the primary has negative coordinates.
+        let (pos, size, scale) = LAPTOP_LEFT;
+        let panel = window_rect(pos, size, scale, false, 0.0);
+        assert_eq!(panel.x, -3456 + 648);
+        assert_eq!(to_window_logical((-1728.0, 0.0), (panel.x, panel.y), scale), (360.0, 0.0));
+        // A broken scale factor never divides by zero.
+        assert_eq!(to_window_logical((10.0, 10.0), (0, 0), 0.0), (10.0, 10.0));
+    }
+
+    #[test]
+    fn the_compact_island_takes_the_mouse_on_a_300_percent_display_and_not_beside_it() {
+        let (pos, size, scale) = LAPTOP;
+        let panel = window_rect(pos, size, scale, false, 0.0);
+        let compact = IslandRect { x: 216.0, y: 0.0, w: 288.0, h: 32.0 };
+        let window = (PANEL_W, PANEL_H);
+        let at = |px: f64, py: f64| to_window_logical((px, py), (panel.x, panel.y), scale);
+        // On the island (physical 1728, 48 = logical 360, 16).
+        assert!(takes_mouse(false, &compact, at(1728.0, 48.0), window, false));
+        // Beside it, still inside the transparent panel: clicks go to the window behind.
+        assert!(!takes_mouse(false, &compact, at(900.0, 48.0), window, false));
+        assert!(!takes_mouse(false, &compact, at(1728.0, 400.0), window, false));
+        // A cursor not converted at all (physical used as logical) would land far off the
+        // island and the island could never be clicked; a correct one is on it.
+        assert!(!compact.takes(1728.0, 48.0) && compact.takes(at(1728.0, 48.0).0, at(1728.0, 48.0).1));
+        // With the left button held anywhere over the panel it takes the mouse (file drags).
+        assert!(takes_mouse(false, &compact, at(900.0, 48.0), window, true));
+        assert!(!takes_mouse(false, &compact, at(100.0, 48.0), window, true), "not outside the panel");
+    }
+
+    #[test]
+    fn the_wake_strip_sits_under_the_island_and_always_takes_the_mouse() {
+        for (pos, size, scale) in [LAPTOP, MONITOR_RIGHT, MONITOR_PRIMARY, LAPTOP_LEFT] {
+            for offset in [0.0, 0.25, -0.4, 0.9] {
+                let panel = window_rect(pos, size, scale, false, offset);
+                let strip = window_rect(pos, size, scale, true, offset);
+                // 240×6 logical, at the top of the display.
+                assert_eq!((strip.w, strip.h), ((STRIP_W * scale) as u32, (STRIP_H * scale) as u32));
+                assert_eq!(strip.y, pos.1);
+                // Centred under the island wherever it was dragged (within a pixel).
+                let centre = |r: Rect| r.x as f64 + r.w as f64 / 2.0;
+                assert!((centre(strip) - centre(panel)).abs() <= 1.0, "{offset} at {scale}: {strip:?} {panel:?}");
+                // On the display.
+                assert!(strip.x >= pos.0 && strip.right() <= pos.0 + size.0 as i32);
+                // The top edge above the island's centre is on the strip, in its own pixels.
+                let (x, y) = to_window_logical((centre(panel), pos.1 as f64), (strip.x, strip.y), scale);
+                assert!((0.0..=STRIP_W).contains(&x) && (0.0..=STRIP_H).contains(&y), "{x},{y}");
+                // And the strip takes the mouse there, whatever island shape the page last
+                // reported (hidden: zero height) and wherever the cursor is.
+                let hidden = IslandRect { x: 268.0, y: 0.0, w: 184.0, h: 0.0 };
+                for at in [(x, y), (0.0, 0.0), (239.0, 5.0), (-500.0, 900.0), (f64::NAN, f64::NAN)] {
+                    assert!(takes_mouse(true, &hidden, at, (STRIP_W, STRIP_H), false));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_tick_from_the_panel_never_makes_the_wake_strip_click_through() {
+        // The panel, the cursor away from the island: click-through on.
+        let gate = PollGate::new();
+        gate.collapsed.store(false, Ordering::Relaxed);
+        gate.set_rect(IslandRect { x: 268.0, y: 0.0, w: 184.0, h: 0.0 });
+        let panel = (PANEL_W, PANEL_H);
+        assert_eq!(gate.click_through_change((100.0, 200.0), panel, false, false), Some(true));
+        assert_eq!(gate.click_through_change((100.0, 210.0), panel, false, false), None, "unchanged");
+        // set_collapsed: the window becomes the wake strip and takes the mouse.
+        gate.collapsed.store(true, Ordering::Relaxed);
+        let strip = (STRIP_W, STRIP_H);
+        assert_eq!(gate.click_through_change((-120.0, 300.0), strip, false, true), Some(false));
+        // The poll's last tick arrives afterwards, read against the panel: the cursor is
+        // off the island, which used to switch click-through back on for good.
+        assert_eq!(gate.click_through_change((100.0, 200.0), panel, false, false), None);
+        assert_eq!(gate.click_through_change((f64::NAN, f64::NAN), strip, false, false), None);
+        assert!(!gate.ignoring.load(Ordering::Relaxed), "the wake strip still takes the mouse");
+        // Woken: the panel again, decided from the island and the cursor.
+        gate.collapsed.store(false, Ordering::Relaxed);
+        assert_eq!(gate.click_through_change((360.0, 3.0), panel, false, true), Some(false), "on the island");
+        assert_eq!(gate.click_through_change((100.0, 200.0), panel, false, false), Some(true));
     }
 
     #[test]
@@ -506,6 +675,21 @@ mod tests {
         assert_eq!(clamp_offset(f64::NAN, 1920.0, 720.0), 0.0);
         assert_eq!(clamp_offset(0.1, 1920.0, 720.0), 0.1);
         assert!((clamp_offset(1.0, 1920.0, 720.0) - 0.3125).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_drag_moves_the_island_from_where_it_is_drawn() {
+        // A 1920 px display at 150 %: 1280 logical, so the island centre goes at most
+        // (1280 - 720) / 2 / 1280 = 0.21875 of the width right of the display centre.
+        let max = 0.21875;
+        assert!((drag_offset(0.0, 128.0, 1280.0) - 0.1).abs() < 1e-9);
+        assert!((drag_offset(0.0, 10_000.0, 1280.0) - max).abs() < 1e-9, "clamped to the display");
+        // Saved further right than this display allows (a wider display, a hand edit): the
+        // island is drawn at the edge, and dragging 200 px left moves it 200 px from there.
+        assert!((drag_offset(0.3125, -200.0, 1280.0) - (max - 200.0 / 1280.0)).abs() < 1e-9);
+        // Garbage in, centred / no movement.
+        assert_eq!(drag_offset(f64::NAN, 0.0, 1280.0), 0.0);
+        assert_eq!(drag_offset(0.1, f64::INFINITY, 1280.0), 0.1);
     }
 
     #[test]

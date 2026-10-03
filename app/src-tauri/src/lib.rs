@@ -127,8 +127,7 @@ fn island_drag(app: AppHandle, shared: State<Shared>, phase: String, dx: f64) {
     // A move without its start (should not happen) starts the drag where the island is.
     let from = *shared.gate.drag_from.lock().unwrap().get_or_insert(current);
     let width = island::drag_monitor_width(&app, &pref);
-    let dx = if dx.is_finite() { dx } else { 0.0 };
-    let offset = island::clamp_offset(from + dx / width.max(1.0), width, island::PANEL_W);
+    let offset = island::drag_offset(from, dx, width);
     let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
     island::move_to(&app, &pref, collapsed, offset);
     let updated = {
@@ -169,10 +168,11 @@ fn store_placement(app: &AppHandle, settings: Settings) {
 #[tauri::command]
 fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
     let (pref, offset) = placement(&shared);
+    // Before the window changes: the click-through decision apply_geometry makes for the
+    // new shape (the wake strip always takes the mouse) reads it, and so does any cursor
+    // tick still on its way to the main thread.
     shared.gate.collapsed.store(collapsed, Ordering::Relaxed);
     island::apply_geometry(&app, &pref, collapsed, offset);
-    // The wake strip must always take the mouse, and a resize invalidates the flag.
-    island::refresh_click_through(&app, &shared.gate);
     shared.gate.set_active(!collapsed);
 }
 
@@ -668,16 +668,14 @@ pub fn run() {
             // Before the island: see create_settings_window.
             create_settings_window(&handle);
 
+            // The full panel, so the launch greeting has room. Placing it also decides
+            // click-through: nothing is drawn yet, so nothing takes the mouse until the
+            // page reports the island's shape.
+            gate.collapsed.store(false, Ordering::Relaxed);
             if let Some(win) = island::window(&handle) {
                 platform::make_non_activating(&win);
                 island::apply_geometry(&handle, &loaded.screen, false, loaded.island_offset);
                 let _ = win.show();
-            }
-            gate.collapsed.store(false, Ordering::Relaxed);
-            // Nothing drawn yet, so nothing takes the mouse until the page
-            // reports the island's shape.
-            if !platform::CURSOR_POLL {
-                island::refresh_click_through(&handle, &gate);
             }
             gate.set_active(true);
             island::spawn_cursor_poll(handle.clone(), gate.clone());
