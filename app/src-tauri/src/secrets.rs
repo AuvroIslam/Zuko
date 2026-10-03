@@ -15,8 +15,9 @@ pub const VAULT_KEY: &str = "vault-key";
 
 /// Every key Zuko may store. Anything outside this list is refused.
 pub const KNOWN_KEYS: &[&str] = &[
-    // The user's own key for the island chat.
+    // The user's own keys for the island chat (Claude or OpenAI, Settings → Chat).
     "anthropic-api-key",
+    "openai-api-key",
     VAULT_KEY,
 ];
 
@@ -127,6 +128,7 @@ mod tests {
     fn vault_key_is_known_but_out_of_ui_reach() {
         assert!(KNOWN_KEYS.contains(&VAULT_KEY));
         assert!(ui_may_touch("anthropic-api-key"));
+        assert!(ui_may_touch("openai-api-key"));
         assert!(!ui_may_touch(VAULT_KEY));
         assert!(!ui_may_touch("github-token"));
     }

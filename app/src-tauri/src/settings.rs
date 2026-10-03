@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::chat::Provider;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -15,14 +17,47 @@ pub struct Settings {
     pub screen: String,
     pub autostart: bool,
     pub hooks_installed: bool,
-    /// Claude model used by the chat. Changeable in the settings window.
+    /// Who answers the island chat: "anthropic" (the default), "openai" or "ollama".
+    /// See chat.rs for how an unknown value is read.
+    pub chat_provider: Provider,
+    /// The Claude model for the chat (the Anthropic provider). It kept its original
+    /// name, so a choice made with an older build survives.
     /// Defaulted explicitly so a settings.json written by an older build still loads.
     #[serde(default = "default_model")]
     pub model: String,
+    /// The OpenAI model for the chat.
+    #[serde(default = "default_openai_model")]
+    pub openai_model: String,
+    /// The Ollama model for the chat (independent of the local AI's scan model).
+    #[serde(default = "default_ollama_model")]
+    pub ollama_model: String,
 }
 
 fn default_model() -> String {
-    crate::claude::DEFAULT_MODEL.to_string()
+    Provider::Anthropic.default_model().to_string()
+}
+
+fn default_openai_model() -> String {
+    Provider::OpenAi.default_model().to_string()
+}
+
+fn default_ollama_model() -> String {
+    Provider::Ollama.default_model().to_string()
+}
+
+impl Settings {
+    /// The model the chat uses with `provider` (its default when the field is blank).
+    pub fn chat_model(&self, provider: Provider) -> String {
+        let model = match provider {
+            Provider::Anthropic => &self.model,
+            Provider::OpenAi => &self.openai_model,
+            Provider::Ollama => &self.ollama_model,
+        };
+        match model.trim() {
+            "" => provider.default_model().to_string(),
+            m => m.to_string(),
+        }
+    }
 }
 
 impl Default for Settings {
@@ -35,7 +70,10 @@ impl Default for Settings {
             screen: "primary".into(),
             autostart: false,
             hooks_installed: false,
+            chat_provider: Provider::Anthropic,
             model: default_model(),
+            openai_model: default_openai_model(),
+            ollama_model: default_ollama_model(),
         }
     }
 }
@@ -110,4 +148,36 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     let json = serde_json::to_vec_pretty(settings)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     crate::files::write_atomic(&settings_path(), &json)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_from_older_builds_keep_their_choices() {
+        // Written before the chat had providers: it stays with Claude and that model.
+        let old: Settings = serde_json::from_str(r#"{"soundEnabled":false,"screen":"cursor","model":"claude-sonnet-5"}"#).unwrap();
+        assert!(!old.sound_enabled);
+        assert_eq!(old.screen, "cursor");
+        assert_eq!(old.chat_provider, Provider::Anthropic);
+        assert_eq!(old.chat_model(Provider::Anthropic), "claude-sonnet-5");
+        assert_eq!(old.chat_model(Provider::OpenAi), Provider::OpenAi.default_model());
+        assert_eq!(old.chat_model(Provider::Ollama), "gemma3:4b");
+
+        // The new fields round-trip.
+        let mut s = Settings { chat_provider: Provider::OpenAi, openai_model: "gpt-4.1".into(), ..Settings::default() };
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["chatProvider"], "openai");
+        assert_eq!(json["openaiModel"], "gpt-4.1");
+        assert_eq!(json["ollamaModel"], "gemma3:4b");
+        assert_eq!(serde_json::from_value::<Settings>(json).unwrap().chat_model(Provider::OpenAi), "gpt-4.1");
+        s.ollama_model = "  ".into();
+        assert_eq!(s.chat_model(Provider::Ollama), "gemma3:4b");
+
+        // A provider this build does not know keeps every other preference and stays local.
+        let newer: Settings = serde_json::from_str(r#"{"soundEnabled":false,"chatProvider":"gemini"}"#).unwrap();
+        assert!(!newer.sound_enabled);
+        assert_eq!(newer.chat_provider, Provider::Ollama);
+    }
 }

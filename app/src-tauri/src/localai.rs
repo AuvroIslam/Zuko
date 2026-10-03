@@ -56,8 +56,8 @@ const MAX_IN_FLIGHT: usize = 2;
 const CACHE_MAX: usize = 256;
 /// Vault entry source for values the local model found.
 pub const SOURCE: &str = "local-ai";
-/// How long Ollama keeps the model loaded after a call.
-const KEEP_ALIVE: &str = "15m";
+/// How long Ollama keeps the model loaded after a call (the island chat uses it too).
+pub const KEEP_ALIVE: &str = "15m";
 /// Characters per document chunk (one prompt each).
 const DOC_CHUNK_CHARS: usize = 3500;
 /// A document's whole deep scan may take this many per-call timeouts.
@@ -205,18 +205,20 @@ impl LocalAi {
         Ok(base)
     }
 
-    /// One `/api/chat` call with JSON output, temperature 0, bounded by `timeoutMs`
-    /// (the wait for a free slot included). Returns the message content.
-    async fn chat(&self, cfg: &LocalAiConfig, messages: Value, max_tokens: u32) -> Result<String, AiError> {
-        let base = LocalAi::base(cfg)?;
-        let body = json!({
-            "model": cfg.model.trim(),
-            "messages": messages,
-            "stream": false,
-            "format": "json",
-            "keep_alive": KEEP_ALIVE,
-            "options": { "temperature": 0, "num_predict": max_tokens },
-        });
+    /// One non-streaming `/api/chat` call, the only way anything here talks to Ollama's
+    /// chat endpoint. `endpoint` is validated as loopback and `model` checked before
+    /// anything is sent (every call, whatever the caller checked before); `model` and
+    /// `"stream": false` are set on `body`; a slot is taken first and the wait for it
+    /// counts against `timeout`. Returns Ollama's JSON answer.
+    ///
+    /// Used by the jobs below (with the local AI's own config) and by the island chat's
+    /// Ollama provider (chat/ollama.rs), which works whether or not the local AI scans
+    /// are switched on.
+    pub async fn chat_request(&self, endpoint: &str, model: &str, mut body: Value, timeout: Duration) -> Result<Value, AiError> {
+        let base = core::validate_endpoint(endpoint).map_err(AiError::Config)?;
+        core::validate_model(model).map_err(AiError::Config)?;
+        body["model"] = json!(model.trim());
+        body["stream"] = json!(false);
         let work = async {
             let _slot = self.permits.acquire().await.map_err(|_| AiError::Http("client closed".into()))?;
             self.requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -236,13 +238,25 @@ impl LocalAi {
                     .unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
                 return Err(AiError::Http(format!("Ollama refused the request: {why}")));
             }
-            let v: Value = serde_json::from_str(&text).map_err(|_| AiError::BadAnswer("not JSON".into()))?;
-            v.pointer("/message/content")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .ok_or_else(|| AiError::BadAnswer("no message content".into()))
+            serde_json::from_str::<Value>(&text).map_err(|_| AiError::BadAnswer("not JSON".into()))
         };
-        tokio::time::timeout(Duration::from_millis(cfg.timeout_ms()), work).await.map_err(|_| AiError::Timeout)?
+        tokio::time::timeout(timeout, work).await.map_err(|_| AiError::Timeout)?
+    }
+
+    /// One `/api/chat` call with JSON output, temperature 0, bounded by `timeoutMs`
+    /// (the wait for a free slot included). Returns the message content.
+    async fn chat(&self, cfg: &LocalAiConfig, messages: Value, max_tokens: u32) -> Result<String, AiError> {
+        let body = json!({
+            "messages": messages,
+            "format": "json",
+            "keep_alive": KEEP_ALIVE,
+            "options": { "temperature": 0, "num_predict": max_tokens },
+        });
+        let v = self.chat_request(&cfg.endpoint, &cfg.model, body, Duration::from_millis(cfg.timeout_ms())).await?;
+        v.pointer("/message/content")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| AiError::BadAnswer("no message content".into()))
     }
 
     fn cache_key(cfg: &LocalAiConfig, task: &str, text: &str) -> String {
@@ -674,11 +688,13 @@ pub(crate) mod mock {
         pub content: Option<String>,
         pub delay: Duration,
         pub models: Vec<String>,
+        /// HTTP status of /api/chat; anything but 200 answers `{"error": <content>}`.
+        pub status: u16,
     }
 
     impl Default for Script {
         fn default() -> Self {
-            Script { content: None, delay: Duration::ZERO, models: vec!["gemma3:4b".into()] }
+            Script { content: None, delay: Duration::ZERO, models: vec!["gemma3:4b".into()], status: 200 }
         }
     }
 
@@ -728,8 +744,8 @@ pub(crate) mod mock {
                             let path = req.uri().path().to_string();
                             let body = String::from_utf8_lossy(&req.into_body().collect().await.unwrap().to_bytes()).to_string();
                             let script = m.script.lock().unwrap().clone();
-                            let out = if path == "/api/tags" {
-                                json!({ "models": script.models.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>() }).to_string()
+                            let (status, out) = if path == "/api/tags" {
+                                (200, json!({ "models": script.models.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>() }).to_string())
                             } else {
                                 m.bodies.lock().unwrap().push(body.clone());
                                 tokio::time::sleep(script.delay).await;
@@ -738,9 +754,15 @@ pub(crate) mod mock {
                                     .and_then(|v| v.pointer("/messages/1/content").and_then(Value::as_str).map(str::to_string))
                                     .unwrap_or_default();
                                 let content = script.content.clone().unwrap_or_else(|| smart(&prompt));
-                                json!({ "model": "gemma3:4b", "message": { "role": "assistant", "content": content }, "done": true }).to_string()
+                                if script.status != 200 {
+                                    (script.status, json!({ "error": content }).to_string())
+                                } else {
+                                    (200, json!({ "model": "gemma3:4b", "message": { "role": "assistant", "content": content }, "done": true }).to_string())
+                                }
                             };
-                            Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(out))))
+                            let mut resp = Response::new(Full::new(Bytes::from(out)));
+                            *resp.status_mut() = hyper::StatusCode::from_u16(status).unwrap();
+                            Ok::<_, Infallible>(resp)
                         }
                     });
                     let _ = http1::Builder::new().serve_connection(TokioIo::new(stream), svc).await;
