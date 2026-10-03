@@ -90,6 +90,14 @@ export const Bridge = {
 
   reposition: () => call<void>("reposition"),
 
+  /**
+   * Dragging the island along the top edge. `dx`: logical pixels the pointer moved since
+   * the press (from `screenX`, which does not move with the window). "end" saves the place.
+   */
+  islandDrag: (phase: "start" | "move" | "end", dx: number) => call<void>("island_drag", { phase, dx }),
+  /** Back to the top centre (Settings → General, or a double-click on the island's header). */
+  resetIslandPosition: () => call<void>("reset_island_position"),
+
   openUrl: (url: string) => call<void>("open_url", { url }),
 
   /** "Open terminal" → opens the folder in VS Code when `code` is on PATH. */
@@ -653,6 +661,8 @@ export interface EventMap {
   tray: string;
   hook: HookEventPayload;
   "screen-changed": null;
+  /** The settings window got the focus (island only): fold away unless a card is waiting. */
+  "settings-focused": null;
   "settings-changed": Settings;
   activity: ActivityItem;
   privacy: PrivacyEvent;

@@ -56,6 +56,10 @@ async function main() {
 
   await onEvent("screen-changed", () => void Bridge.reposition());
 
+  // The settings window came forward: the island folds back to compact so it never
+  // covers its title bar, unless an approval card is waiting for an answer.
+  await onEvent("settings-focused", () => island.yieldToSettings());
+
   // The settings window writes preferences; apply them here without a restart.
   await onEvent("settings-changed", (s) => {
     // A conversation belongs to one chat provider (Rust drops it on the next turn):

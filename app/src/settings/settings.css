@@ -331,6 +331,12 @@ section > h2 .count:empty {
   gap: 12px;
 }
 
+.stack-8 {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .feedback:empty {
   display: none;
 }

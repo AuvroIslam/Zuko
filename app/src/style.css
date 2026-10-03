@@ -47,6 +47,12 @@ body {
   cursor: default;
 }
 
+/* While the island is dragged along the top edge (island.ts pressToDrag). */
+body.island-dragging,
+body.island-dragging * {
+  cursor: grabbing !important;
+}
+
 #root {
   position: fixed;
   inset: 0;
@@ -219,7 +225,9 @@ body {
   transition: opacity 0.2s ease-in-out;
 }
 
+/* The header is where the island is grabbed to move it along the top edge. */
 #header {
+  cursor: grab;
   height: 34px;
   flex: 0 0 34px;
   display: flex;

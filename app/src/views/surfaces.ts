@@ -76,13 +76,13 @@ function claudeCard(task: AgentTask, p: ProtectionStatus | null, actions: ViewAc
   return h(
     "div",
     { class: "sf-card" },
-    head(task.color, task.name, "Agent firewall"),
+    // The counters are today's (back to 0 at midnight); three "… today" labels do not fit.
+    head(task.color, task.name, "Firewall · today"),
     line,
-    // Today's counters (back to 0 at midnight).
     tiles(
-      [p?.askedTotal ?? 0, "asked today", AMBER],
-      [p?.blockedTotal ?? 0, "blocked today", RED],
-      [p?.autoAllowedTotal ?? 0, "auto-allowed today"],
+      [p?.askedTotal ?? 0, "asked", AMBER],
+      [p?.blockedTotal ?? 0, "blocked", RED],
+      [p?.autoAllowedTotal ?? 0, "auto-allowed"],
     ),
     links(
       ["Open VS Code", () => actions.openTerminal()],
@@ -137,11 +137,11 @@ function policyCard(task: AgentTask, p: ProtectionStatus | null, actions: ViewAc
   return h(
     "div",
     { class: "sf-card" },
-    head(task.color, task.name, monitor ? "Monitor mode" : "Enforced"),
+    head(task.color, task.name, monitor ? "Monitor mode · today" : "Enforced · today"),
     tiles(
-      [p?.blockedTotal ?? 0, monitor ? "would block today" : "blocked today", RED],
-      [p?.askedTotal ?? 0, "asked today", AMBER],
-      [p?.autoAllowedTotal ?? 0, "auto-allowed today"],
+      [p?.blockedTotal ?? 0, monitor ? "would block" : "blocked", RED],
+      [p?.askedTotal ?? 0, "asked", AMBER],
+      [p?.autoAllowedTotal ?? 0, "auto-allowed"],
     ),
     last
       ? h("div", { class: "sf-rows" }, activityRow(last))

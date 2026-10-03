@@ -173,6 +173,17 @@ function generalSection(): HTMLElement {
     void save();
   });
 
+  const resetPosition = h("button", { class: "small", text: "Reset island position" }) as HTMLButtonElement;
+  const paintReset = () => {
+    const centred = Math.abs(settings.islandOffset ?? 0) < 0.0005;
+    resetPosition.disabled = centred;
+    resetPosition.title = centred ? "The island is at the top centre." : "Back to the top centre of the display";
+  };
+  resetPosition.addEventListener("click", () => void Bridge.resetIslandPosition());
+  paintReset();
+  // A drag on the island (or this button) comes back as settings-changed.
+  void onEvent("settings-changed", () => window.setTimeout(paintReset, 0));
+
   el.append(
     h("div", { class: "row" },
       h("label", { text: "Sound" }),
@@ -187,6 +198,11 @@ function generalSection(): HTMLElement {
     h("div", { class: "row" },
       h("label", { text: "Island lives on" }),
       screen,
+    ),
+    h("div", { class: "row" },
+      h("label", { text: "Island position" }),
+      resetPosition,
+      h("span", { class: "hint", text: "Drag the island by its top bar to move it along the top edge; double-click the bar to centre it." }),
     ),
     h("div", { class: "row" },
       h("label", { text: "Launch at startup" }),

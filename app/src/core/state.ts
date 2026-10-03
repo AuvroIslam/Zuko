@@ -158,6 +158,12 @@ export interface Settings {
   ollamaModel: string;
   /** Zuko registers the browser extension's native host for this user at launch (Settings → Browser). */
   browserBridge: boolean;
+  /**
+   * Where the island sits along the top edge: its centre's distance from the display's
+   * centre as a fraction of the display width (0 = centred). Only Rust changes it (a drag,
+   * or Reset island position); a saved Settings object cannot move it.
+   */
+  islandOffset: number;
 }
 
 /** Who answers the island chat: Claude and OpenAI get masked text, Ollama stays on this PC. */
@@ -192,6 +198,7 @@ export const DEFAULT_SETTINGS: Settings = {
   openaiModel: "gpt-5-mini",
   ollamaModel: "gemma3:4b",
   browserBridge: true,
+  islandOffset: 0,
 };
 
 /** The model the chat uses with `provider` (the default when the field is blank). */

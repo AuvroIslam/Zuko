@@ -272,6 +272,17 @@ function nativeHost(on: boolean): NativeHostStatus {
   };
 }
 
+// ── Island position ───────────────────────────────────────────────────────────
+
+let dragFrom = 0;
+
+function placeIsland(offset: number, save: boolean) {
+  mockSettings = { ...mockSettings, islandOffset: offset };
+  const root = document.getElementById("root");
+  if (root) root.style.translate = `${Math.round(offset * 1920)}px 0`;
+  if (save) emit("settings-changed", { ...mockSettings });
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 const delay = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -447,6 +458,13 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     return [...out, ...(by[e.kind] ?? []).map(([label, text]) => ({ label, text }))];
   },
   vault_copy: (a) => vault.some((v) => v.key === a.key),
+  // No window to move in a browser: the page itself shifts, as if on a 1920 px display.
+  island_drag: (a) => {
+    if (a.phase === "start") dragFrom = mockSettings.islandOffset;
+    const offset = Math.max(-0.3125, Math.min(0.3125, dragFrom + Number(a.dx) / 1920));
+    placeIsland(offset, a.phase === "end");
+  },
+  reset_island_position: () => placeIsland(0, true),
   native_host_status: () => nativeHost(mockSettings.browserBridge),
   native_host_set: (a) => {
     mockSettings = { ...mockSettings, browserBridge: a.enabled === true };
@@ -584,6 +602,16 @@ const APPROVALS: Record<string, { tool: string; input: Record<string, unknown>; 
 };
 
 let seq = 0;
+
+/** Presses the island's header and drags it `dx` px sideways, then lets go. */
+function dragHeader(dx: number) {
+  const header = document.getElementById("header");
+  if (!header) return;
+  const x = 500;
+  header.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, buttons: 1, screenX: x }));
+  for (const f of [0.25, 0.5, 1]) window.dispatchEvent(new MouseEvent("mousemove", { buttons: 1, screenX: x + dx * f }));
+  window.dispatchEvent(new MouseEvent("mouseup", { screenX: x + dx }));
+}
 
 function permissionRequest(kind: string) {
   const a = APPROVALS[kind] ?? APPROVALS.medium;
@@ -752,8 +780,78 @@ const SCENES: Record<string, (island: Island) => void> = {
         ?.dispatchEvent(new PointerEvent("pointerdown", { button: 0, bubbles: true }));
     }, 700);
   },
+  // The island dragged 240 px to the right by its header (the page shifts in mock mode).
+  "island-drag": (island) => {
+    State.isPinned = true;
+    island.alert("overview");
+    window.setTimeout(() => dragHeader(240), 400);
+  },
   // Self-tests: the verdict lands in document.title. They need real frames, so
   // read the title over DevTools after ~5 s rather than with --dump-dom.
+  "selftest-drag": (island) => {
+    State.isPinned = true;
+    island.alert("overview");
+    const moves: { phase: string; dx: number }[] = [];
+    const real = handlers.island_drag;
+    handlers.island_drag = (a) => {
+      moves.push({ phase: String(a.phase), dx: Number(a.dx) });
+      return real(a);
+    };
+    window.setTimeout(() => {
+      // A click on a header button is a click, never a drag; a 2 px wobble neither.
+      const tab = document.querySelector<HTMLElement>("#header .tab");
+      tab?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, buttons: 1, screenX: 300 }));
+      window.dispatchEvent(new MouseEvent("mousemove", { buttons: 1, screenX: 360 }));
+      window.dispatchEvent(new MouseEvent("mouseup", { screenX: 360 }));
+      dragHeader(2);
+      // Commands answer after a short mock delay: count once they have landed.
+      window.setTimeout(() => {
+        const quiet = moves.length;
+        dragHeader(-180);
+        window.setTimeout(() => {
+          const end = moves.find((m) => m.phase === "end");
+          const ok = quiet === 0 && moves[0]?.phase === "start" && end?.dx === -180 &&
+            Math.abs(mockSettings.islandOffset - -180 / 1920) < 1e-9 && State.mode === "expanded";
+          document.title = `selftest-drag ${ok ? "PASS" : "FAIL"} quiet=${quiet} moves=${JSON.stringify(moves)} offset=${mockSettings.islandOffset}`;
+        }, 300);
+      }, 200);
+    }, 400);
+  },
+  // The settings window takes the focus: the island folds away, except for a waiting card.
+  "selftest-settings-focus": (island) => {
+    permissionRequest("medium");
+    window.setTimeout(() => {
+      emit("settings-focused", null);
+      const keptCard = State.mode === "expanded" && State.view === "approval";
+      island.decide("deny", 1500);
+      island.alert("overview");
+      window.setTimeout(() => {
+        emit("settings-focused", null);
+        window.setTimeout(() => {
+          const folded = State.mode === "compact";
+          document.title = `selftest-settings-focus ${keptCard && folded ? "PASS" : "FAIL"} keptCard=${keptCard} folded=${folded} mode=${State.mode}`;
+        }, 300);
+      }, 300);
+    }, 400);
+  },
+  // An approval answered while the pointer is away: the island closes itself after the
+  // auto-close interval (it used to stay open until the pointer came and went).
+  "selftest-autoclose": (island) => {
+    State.settings.autoCloseInterval = 0.4;
+    island.applySettings();
+    permissionRequest("medium");
+    window.setTimeout(() => {
+      const heldOpen = State.mode === "expanded";
+      island.decide("allow", 2000);
+      window.setTimeout(() => {
+        const open = State.mode === "expanded";
+        window.setTimeout(() => {
+          const ok = heldOpen && open && State.mode === "compact";
+          document.title = `selftest-autoclose ${ok ? "PASS" : "FAIL"} heldOpen=${heldOpen} openAfterAnswer=${open} mode=${State.mode}`;
+        }, 900);
+      }, 100);
+    }, 700);
+  },
   "selftest-hold": () => {
     permissionRequest("high");
     const sent: unknown[] = [];

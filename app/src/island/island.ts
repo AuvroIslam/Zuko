@@ -28,6 +28,18 @@ const HIT_MARGIN = 14;
 /** Frame interval while only the flame flickers (~15 fps). */
 const AMBIENT_FRAME_MS = 66;
 
+/** Pixels the pointer must travel sideways before a press on the island becomes a drag. */
+const DRAG_THRESHOLD = 4;
+/**
+ * Where a press never starts a drag: controls, text people select, and lists that scroll
+ * (their scrollbars are part of them). Zuko himself is handled before this is asked.
+ */
+const NO_DRAG = [
+  "button", "a", "input", "textarea", "select", "label", "[contenteditable]", "[role='button']",
+  ".pill", ".switch", ".seg", ".chat-log", ".feed-list", ".bubble", ".reply", ".code", ".upload-hit",
+  "[data-nodrag]",
+].join(", ");
+
 /** The three views the drop sequence owns; leaving them stops the engine. */
 const UPLOAD_VIEWS: ReadonlySet<IslandViewName> = new Set(["upload", "uploading", "choose"]);
 
@@ -100,6 +112,9 @@ export class Island {
   /** A privacy notice arrived while an approval card was up. */
   private privacyDeferred = false;
 
+  /** The island is being dragged along the top edge. */
+  private dragging = false;
+
   constructor(root: HTMLElement) {
     this.root = root;
     this.build();
@@ -145,8 +160,8 @@ export class Island {
       keepAlive: () => this.ensureRunning(),
       dismissPrivacy: () => {
         State.privacyNotice = null;
-        this.dropPin();
         State.isPinned = false;
+        this.dropPin();
         this.setView(State.defaultView());
       },
       toggleSound: () => {
@@ -338,9 +353,24 @@ export class Island {
     this.fsm.reveal();
   }
 
-  /** An alert stopped waiting for an answer: let the island auto-close again. */
+  /**
+   * An alert stopped waiting for an answer: let the island auto-close again. When the
+   * pointer is already gone (an approval that timed out, or one answered elsewhere) the
+   * auto-close starts now; before, nothing started it and the expanded island stayed
+   * over whatever was under it until the pointer came back and left again.
+   */
   dropPin() {
     this.fsm.pinned = false;
+    if (!this.wasInIsland && this.fsm.state === "home" && !State.isPinned) {
+      this.fsm.mouseLeft();
+      this.homeCollapseAt = performance.now() + State.settings.autoCloseInterval * 1000;
+    }
+  }
+
+  /** The settings window took the focus: fold away, unless an approval card is waiting. */
+  yieldToSettings() {
+    if (State.pendingApproval || State.mode !== "expanded" || this.dragging) return;
+    this.collapse();
   }
 
   /**
@@ -357,7 +387,7 @@ export class Island {
     const armed = State.rubberStamp.record(req.zuko?.tier ?? null, d, elapsedMs);
     State.pendingApproval = null;
     State.isPinned = false;
-    this.fsm.pinned = false;
+    this.dropPin();
     State.updateTask(CLAUDE_ID, "working");
     State.setPillBadge(CLAUDE_ID, null);
     if (armed) {
@@ -707,14 +737,24 @@ export class Island {
     this.islandEl.addEventListener("mousedown", (e) => {
       Sound.resume();
       State.lastActivity = performance.now();
+      if (e.button !== 0) return;
       if (State.mode !== "expanded") {
-        this.fsm.click();
+        // Compact: a click opens it, a sideways drag moves it.
+        this.pressToDrag(e, () => this.fsm.click());
         return;
       }
       if (this.isBotHit(e.clientX, e.clientY)) {
+        // Zuko keeps his clicks (slaps, the triple-click fire punch): never a drag.
         this.cancelBotHover();
         this.engine.slap();
+        return;
       }
+      if (this.canDrag(e)) this.pressToDrag(e, null);
+    });
+
+    // Double-click on the header (not on its buttons): back to the top centre.
+    this.header.el.addEventListener("dblclick", (e) => {
+      if (State.mode === "expanded" && this.canDrag(e)) void Bridge.resetIslandPosition();
     });
 
     window.addEventListener("keydown", (e) => {
@@ -727,6 +767,62 @@ export class Island {
     // Outside Tauri (plain browser) drive the cursor from DOM events so the
     // island can be inspected with `npm run dev`.
     if (!IS_TAURI) this.followPageCursor();
+  }
+
+  /** A press here may start a drag: the island's header or empty card area, not a control. */
+  private canDrag(e: MouseEvent): boolean {
+    const t = e.target instanceof Element ? e.target : null;
+    return !!t && !t.closest(NO_DRAG);
+  }
+
+  /**
+   * A press that turns into a drag along the top edge once the pointer travels sideways
+   * (`click` runs instead when it is let go first). Rust moves the window and the island
+   * stays centred in it, so the distance comes from `screenX`, which does not move with
+   * the window. Moves go out at most once a frame; the release saves the place.
+   */
+  private pressToDrag(e: MouseEvent, click: (() => void) | null) {
+    const startX = e.screenX;
+    let moved = false;
+    let frame = 0;
+    let dx = 0;
+    const send = () => {
+      frame = 0;
+      void Bridge.islandDrag("move", dx);
+    };
+    const finish = (endX: number) => {
+      window.removeEventListener("mousemove", move, true);
+      window.removeEventListener("mouseup", up, true);
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      if (!moved) {
+        click?.();
+        return;
+      }
+      this.dragging = false;
+      document.body.classList.remove("island-dragging");
+      void Bridge.islandDrag("end", endX - startX);
+    };
+    const move = (ev: MouseEvent) => {
+      // A release the page never saw (outside the window): end here.
+      if ((ev.buttons & 1) === 0) {
+        finish(ev.screenX);
+        return;
+      }
+      dx = ev.screenX - startX;
+      if (!moved) {
+        if (Math.abs(dx) < DRAG_THRESHOLD) return;
+        moved = true;
+        this.dragging = true;
+        this.cancelBotHover();
+        document.body.classList.add("island-dragging");
+        void Bridge.islandDrag("start", 0);
+      }
+      if (!frame) frame = requestAnimationFrame(send);
+    };
+    const up = (ev: MouseEvent) => finish(ev.screenX);
+    window.addEventListener("mousemove", move, true);
+    window.addEventListener("mouseup", up, true);
   }
 
   /**

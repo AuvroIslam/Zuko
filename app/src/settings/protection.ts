@@ -29,7 +29,7 @@ export function protectionSection(initial: ProtectionStatus | null): HTMLElement
   head.prepend(headDot);
 
   const statusList = h("div", { class: "status-list" });
-  const counters = h("div", {});
+  const counters = h("div", { class: "stack-8" });
   const body = h("div", { class: "stack-12" });
   const fb = feedback();
 

@@ -51,10 +51,15 @@ Existing Coucou commands keep their names (`boot`, `save_settings`, `set_collaps
 `secret_present`, `secret_set`, `secret_clear`, `open_settings_window`). Removed:
 `refresh_integration`, `open_n8n`.
 
+`save_settings` never changes `islandOffset` (a window that has not heard of the last drag
+must not move the island back); only the two commands below do.
+
 New commands (JS argument names are camelCase):
 
 | Command | Args | Returns |
 |---|---|---|
+| `island_drag` | `phase: "start" \| "move" \| "end", dx: number` | `void` (the island follows a press-and-drag on its header or empty area: `dx` = logical px the pointer moved since the press, from `screenX`; Rust moves the window along the top edge, clamped to the display; "end" saves `Settings.islandOffset` and emits `settings-changed`) |
+| `reset_island_position` | — | `void` (back to the top centre; saved, `settings-changed`) |
 | `protection_status` | — | `ProtectionStatus` |
 | `protection_preview` | `options: InstallOptions` | `HookPreview` (same shape as `hooks_preview`) |
 | `protection_apply` | `options: InstallOptions, fingerprint: string` | `string` (backup path) |
@@ -215,9 +220,12 @@ interface ChatSettings {
                                // used whether or not localAi.enabled is on
 }
 
-// Settings (settings.json), serde default true: Zuko registers the browser bridge at launch.
-interface BridgeSettings {
-  browserBridge: boolean;
+// Settings (settings.json), serde defaults, so older files load unchanged.
+interface PlacementAndBridgeSettings {
+  browserBridge: boolean;  // default true: Zuko registers the browser bridge at launch
+  islandOffset: number;    // default 0: the island centre's distance from the display centre, as a
+                           // fraction of the display width (negative = left); clamped to the display
+                           // when applied (launch, display change, drag), shared by the wake strip
 }
 
 // The browser bridge (native messaging host `app.zuko.host`, HKCU / ~/.config only).
@@ -275,6 +283,7 @@ was shown, labels are Zuko's own, and failures fall back to the deterministic re
 | `privacy` | all windows | `PrivacyEvent` |
 | `protection-changed` | all windows | `ProtectionStatus` — after any change to what is protected, after decisions and maskings (throttled: at most 4 a second, the last change of a burst always followed by one), when the extension connects or falls silent, and at midnight |
 | `ai-explain` | all windows | `{ requestId: string \| null, activityId: string \| null, text: string, model: string }` — a local AI explanation for an approval card (`requestId`) or a feed item (`activityId`); display only, labelled "AI explanation" |
+| `settings-focused` | island | `null` — the settings window got the focus: the island folds back to compact unless an approval card is waiting. (When it is shown, the settings window is also moved below the island's current bottom on the island's display, within the work area, so the island never covers its title bar.) |
 | `settings-changed`, `tray`, `screen-changed`, `cursor` | unchanged | unchanged |
 
 The `zuko` object on `hook` payloads for `PreToolUse` and `PermissionRequest`:
