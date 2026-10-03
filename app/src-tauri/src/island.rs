@@ -217,6 +217,16 @@ pub fn clamp_offset(offset: f64, monitor_w: f64, panel_w: f64) -> f64 {
     offset.clamp(-max, max)
 }
 
+/// The island's place after a drag `dx` logical px long that began at `from`, on a display
+/// `width` logical px wide. The start is clamped to that display first, as it was drawn:
+/// a place saved on a wider display (or by hand) would otherwise swallow the first part of
+/// the drag, the island standing still until the pointer had made up the difference.
+pub fn drag_offset(from: f64, dx: f64, width: f64) -> f64 {
+    let width = width.max(1.0);
+    let dx = if dx.is_finite() { dx } else { 0.0 };
+    clamp_offset(clamp_offset(from, width, PANEL_W) + dx / width, width, PANEL_W)
+}
+
 /// The left edge (physical) of a window `window_w` wide centred on the island, on a
 /// display at `monitor_x` that is `monitor_w` wide. The island centre is clamped as if
 /// the window were the full panel (`panel_w`), so the panel and the wake strip always
@@ -665,6 +675,21 @@ mod tests {
         assert_eq!(clamp_offset(f64::NAN, 1920.0, 720.0), 0.0);
         assert_eq!(clamp_offset(0.1, 1920.0, 720.0), 0.1);
         assert!((clamp_offset(1.0, 1920.0, 720.0) - 0.3125).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_drag_moves_the_island_from_where_it_is_drawn() {
+        // A 1920 px display at 150 %: 1280 logical, so the island centre goes at most
+        // (1280 - 720) / 2 / 1280 = 0.21875 of the width right of the display centre.
+        let max = 0.21875;
+        assert!((drag_offset(0.0, 128.0, 1280.0) - 0.1).abs() < 1e-9);
+        assert!((drag_offset(0.0, 10_000.0, 1280.0) - max).abs() < 1e-9, "clamped to the display");
+        // Saved further right than this display allows (a wider display, a hand edit): the
+        // island is drawn at the edge, and dragging 200 px left moves it 200 px from there.
+        assert!((drag_offset(0.3125, -200.0, 1280.0) - (max - 200.0 / 1280.0)).abs() < 1e-9);
+        // Garbage in, centred / no movement.
+        assert_eq!(drag_offset(f64::NAN, 0.0, 1280.0), 0.0);
+        assert_eq!(drag_offset(0.1, f64::INFINITY, 1280.0), 0.1);
     }
 
     #[test]
