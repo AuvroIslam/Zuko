@@ -893,6 +893,23 @@ mod tests {
             assert!(body.get("tools").is_none(), "no web search tool outside Claude");
             assert_eq!(r.text, format!("Use {KEY}."));
             assert_eq!(r.report.count, 2);
+
+            // Attachments: a PDF goes as masked text, a picture is not sent at all.
+            let tag = format!("{:?}", target.provider).to_lowercase();
+            let pdf = crate::sanitize::tests_support::tiny_pdf(&[&format!("Invoice for gina@acme.io, key {KEY}")]);
+            let path = inbox_file_with(&format!("{tag}-invoice.pdf"), &pdf);
+            let ctx = ChatContext::File { name: "invoice.pdf".into(), path };
+            let ok = json!({ "choices": [{ "message": { "content": "ok" } }], "message": { "content": "ok" } });
+            let (r, body) = turn_with(&e, &Chat::default(), &target, "summarize", Some(ctx), ok.clone()).await;
+            assert!(r.is_ok(), "{:?}", r.err());
+            let wire = body.to_string();
+            assert!(!wire.contains("gina@acme.io") && !wire.contains(KEY) && !wire.contains("base64"), "{wire}");
+            assert!(wire.contains("File contents (pdf):") && wire.contains("Invoice for {{EMAIL_"), "{wire}");
+            let path = inbox_file_with(&format!("{tag}-shot.png"), b"\x89PNG....");
+            let ctx = ChatContext::File { name: "shot.png".into(), path };
+            let (r, body) = turn_with(&e, &Chat::default(), &target, "what is this", Some(ctx), ok).await;
+            assert!(r.unwrap_err().contains("pictures"));
+            assert_eq!(body, Value::Null, "nothing was sent");
         }
     }
 
