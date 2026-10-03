@@ -240,7 +240,17 @@ Evaluation order: **self-protection → deny → taint invariants → ask → ri
 ## 10. Documents (.txt, .md, .pdf) in the desktop app
 - Drop a file on the Zuko island. Zuko scans it, lists the findings and writes a sanitized copy (`name.zuko.md`), which you can paste or upload anywhere.
 - **Restore:** paste an answer that contains placeholders and Zuko rehydrates it from the vault. Hotkeys mask and unmask the clipboard, so this works with *any* chat app.
-- The built-in chat with Claude always goes through the masker.
+- The built-in island chat always goes through the masker, whichever provider answers
+  (Settings → Chat): **Claude** (Anthropic Messages API, web search) or **OpenAI** (Chat
+  Completions, the user's key in the OS keyring as `openai-api-key`) get masked text
+  only; **Ollama** on this machine (`/api/chat` at the `localAi` endpoint, loopback only,
+  through the same client as the local AI, whether or not its scans are on) keeps it on
+  the PC. Every provider gets the same pipeline: message, window context and attached
+  text/PDF text masked, placeholder legend in the system prompt, reply rehydrated
+  locally, a privacy notice, images refused. A conversation belongs to one provider, so
+  switching starts a new one and nothing said to the local model is replayed to a cloud
+  one. `src-tauri/src/chat.rs` holds the shared pipeline; `chat/{anthropic,openai,ollama}.rs`
+  only map requests and responses and make the call.
 
 ### 10b. Local AI (optional, off by default)
 An on-device model in Ollama (default `gemma3:4b` at `http://127.0.0.1:11434`) catches what
@@ -310,6 +320,7 @@ so slower machines should raise `timeoutMs` or use a smaller model.
 | 9 | Tests and real end-to-end runs | done (see below) |
 | 10 | Security review and fixes, README | done for the pipe trust boundary (only Zuko's own binaries may talk to the app); further review welcome |
 | 11 | Optional local AI (Ollama): deep scans and risk explanations, stricter-only (§10b) | done: core validators + mock-Ollama app tests; real `gemma3:4b` smoke test passes (`cargo test -p zuko --lib real_gemma -- --ignored`) |
+| 12 | Island chat providers: Claude, OpenAI, local Ollama (§10) | done: mock OpenAI and Ollama servers check the wire is masked and the reply restored; real `gemma3:4b` chat smoke test (`cargo test -p zuko --lib real_ollama_chat -- --ignored`): about 23 s cold, 3 s warm |
 
 ### Verified end to end (real Claude Code CLI, real app, fake secrets)
 1. **Gateway mode:** a prompt carrying `sk-proj-…` reached the provider as `{{API_KEY_1}}`. The agent wrote `OPENAI_API_KEY={{API_KEY_1}}`, and `.env` on disk got the real key. The audit log shows `Gateway masked [API_KEY_1]`, then `PreToolUse Write allow`.
@@ -337,6 +348,9 @@ so slower machines should raise `timeoutMs` or use a smaller model.
 - Hooks fail open by Claude Code's design. Gateway mode plus `permissions.deny` rules are the hard floor.
 - The web extension depends on sites' private APIs and DOM, which change. Enforcement sits at the network layer so DOM drift breaks display, not protection.
 - PDFs: text only (no images or OCR); output is markdown, not a redacted PDF.
+- Island chat providers: only Claude has web search. With Ollama, a long attached file
+  can exceed the model's context window (Ollama's default is small; raise
+  `OLLAMA_CONTEXT_LENGTH`), which costs answer quality, never privacy: it all stays local.
 - Some Claude Code traffic skips any gateway. `/bug`, `/feedback`, `/share` and the session survey upload transcripts straight to Anthropic, and in gateway mode the local transcript holds rehydrated values. Zuko sets `DISABLE_BUG_COMMAND=1` and `DISABLE_ERROR_REPORTING=1` when it installs the gateway and tells you why.
 - A trusted project's `.claude/settings.json` can set its own `ANTHROPIC_BASE_URL` and route around the gateway. The relay reports the session's real base URL on every event, and Zuko warns when a session is not using the gateway. Only managed (admin) settings can fully prevent the override.
 - Rehydration is a privileged sink. Zuko fills real values automatically only into local file writes. Shell commands get them through `PreToolUse` only when they have no network egress. WebFetch and MCP calls never get them. This stops a prompt injection from using Zuko itself to send a secret out.
