@@ -9,7 +9,8 @@
 import type {
   ActivityItem, AuditVerifyResult, VaultInsight, BootInfo, BridgeEventName, ChatModels, ChatReply, ChatStatus,
   EntryView, EventMap, HookPreview, HookStatus, InstallOptions, LocalAiConfig, LocalAiStatus, LocalAiTest,
-  MaskTextResult, Policy, PrivacyEvent, ProtectionStatus, SanitizeResult, Tier, UnmaskTextResult, ZukoHookInfo,
+  MaskTextResult, NativeHostStatus, Policy, PrivacyEvent, ProtectionStatus, SanitizeResult, Tier, UnmaskTextResult,
+  ZukoHookInfo,
 } from "../src/core/bridge";
 import type { Island } from "../src/island/island";
 import {
@@ -246,6 +247,31 @@ function chatSend(query: string): ChatReply {
   };
 }
 
+// ── Browser bridge ────────────────────────────────────────────────────────────
+
+/** `&bridge=off` starts with the native host unregistered (screenshots). */
+if (new URLSearchParams(window.location.search).get("bridge") === "off") {
+  mockSettings = { ...mockSettings, browserBridge: false };
+}
+
+function nativeHost(on: boolean): NativeHostStatus {
+  return {
+    registered: on,
+    enabled: on,
+    browsers: [
+      { name: "Chrome", installed: true, registered: on },
+      { name: "Edge", installed: true, registered: on },
+      { name: "Chromium", installed: false, registered: false },
+      { name: "Brave", installed: false, registered: false },
+    ],
+    manifestPath: `${HOME}\\AppData\\Local\\Zuko\\native-host\\app.zuko.host.json`,
+    hostPath: `${HOME}\\AppData\\Local\\Zuko\\bin\\zuko-native-host.exe`,
+    hostPresent: true,
+    extensionId: "cbdnjagdcfchakoejiahgeclappplcba",
+    error: null,
+  };
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 const delay = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -421,6 +447,12 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     return [...out, ...(by[e.kind] ?? []).map(([label, text]) => ({ label, text }))];
   },
   vault_copy: (a) => vault.some((v) => v.key === a.key),
+  native_host_status: () => nativeHost(mockSettings.browserBridge),
+  native_host_set: (a) => {
+    mockSettings = { ...mockSettings, browserBridge: a.enabled === true };
+    emit("settings-changed", { ...mockSettings });
+    return nativeHost(mockSettings.browserBridge);
+  },
   // Rust: `code <cwd> --goto <path>` when cwd holds the file, else `code --reuse-window --goto <path>`.
   open_file: (a) => {
     console.info(`[zuko:mock] open_file ${String(a.path)} in ${a.cwd ? String(a.cwd) : "the last VS Code window"}`);

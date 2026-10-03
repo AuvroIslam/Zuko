@@ -175,6 +175,12 @@ export const Bridge = {
   /** Copies the value to the clipboard on the Rust side (it never reaches the webview) and clears it after 30 s if unchanged. False if the key is gone. */
   vaultCopy: (key: string) => callOrThrow<boolean>("vault_copy", { key }),
 
+  // ── Browser bridge (the extension's native messaging host) ────────────────
+  /** Is `app.zuko.host` registered for this user's browsers. */
+  nativeHostStatus: () => call<NativeHostStatus>("native_host_status"),
+  /** Register (true) or unregister (false) the host; the choice sticks across launches. Explicit clicks only. */
+  nativeHostSet: (enabled: boolean) => callOrThrow<NativeHostStatus>("native_host_set", { enabled }),
+
   // ── Activity and audit ────────────────────────────────────────────────────
   /** Newest first. */
   activityRecent: (limit: number) => call<ActivityItem[]>("activity_recent", { limit }),
@@ -325,6 +331,33 @@ export interface ProtectionStatus {
   extensionConnected: boolean;
   policyPath: string;
   auditPath: string;
+}
+
+/** One browser that can start the native host. */
+export interface NativeHostBrowser {
+  /** "Chrome" | "Edge" | "Chromium" | "Brave" */
+  name: string;
+  /** The browser has settings for this user. */
+  installed: boolean;
+  /** It points at Zuko's host manifest. */
+  registered: boolean;
+}
+
+/** The browser bridge: `app.zuko.host` registered for the current user. */
+export interface NativeHostStatus {
+  /** The manifest is right and every browser that should know the host does. */
+  registered: boolean;
+  /** Zuko registers it at every launch (`Settings.browserBridge`). */
+  enabled: boolean;
+  browsers: NativeHostBrowser[];
+  /** `%LOCALAPPDATA%\Zuko\native-host\app.zuko.host.json` */
+  manifestPath: string;
+  /** The installed native host the manifest points at. */
+  hostPath: string;
+  hostPresent: boolean;
+  extensionId: string;
+  /** Why the last register / unregister failed. */
+  error: string | null;
 }
 
 export type ActivityVerdict =

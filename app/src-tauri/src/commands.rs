@@ -16,7 +16,7 @@
 //   skipped, never fatal.
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -31,6 +31,7 @@ use crate::engine::{self, Engine};
 use crate::events::{self, ActivityItem, PrivacyNote};
 use crate::hooks::{self, HookPreview, InstallOptions};
 use crate::localai::{self, LocalAiStatus, LocalAiTest};
+use crate::nativehost::{self, NativeHostStatus};
 use crate::sanitize::{self, SanitizeResult};
 use crate::{auditlog, gateway, log, policystore};
 
@@ -322,6 +323,46 @@ pub async fn vault_copy(app: AppHandle, engine: State<'_, Engine>, key: String) 
     .map_err(|e| e.to_string())??;
     audit_note(&engine, "VaultCopy", "vault", &format!("Copied {key} to the clipboard (clears in 30 s)"), "info", vec![key]);
     Ok(true)
+}
+
+// ── Browser bridge (the extension's native messaging host) ───────────────────
+
+/// Settings → Browser: is the host registered for this user's browsers.
+#[tauri::command]
+pub fn native_host_status(shared: State<crate::Shared>) -> NativeHostStatus {
+    let enabled = shared.settings.lock().unwrap().browser_bridge;
+    nativehost::status_now(enabled)
+}
+
+/// Settings → Browser → Register / Unregister (explicit clicks only). The choice is kept
+/// in `Settings.browserBridge`, so an unregistered bridge is not put back at the next
+/// launch. Both are audited; the extension notices on its next reconnect.
+#[tauri::command]
+pub fn native_host_set(app: AppHandle, shared: State<crate::Shared>, engine: State<Engine>, enabled: bool) -> NativeHostStatus {
+    let result = if enabled {
+        nativehost::register_now().map(|written| {
+            let to = if written.is_empty() { "already in place".to_string() } else { format!("for {}", written.join(", ")) };
+            format!("Browser bridge registered {to}")
+        })
+    } else {
+        nativehost::unregister_now().map(|()| "Browser bridge unregistered".to_string())
+    };
+    let updated = {
+        let mut s = shared.settings.lock().unwrap();
+        s.browser_bridge = enabled;
+        let _ = crate::settings::save(&s);
+        s.clone()
+    };
+    let _ = app.emit("settings-changed", updated);
+    let mut status = nativehost::status_now(enabled);
+    match result {
+        Ok(summary) => audit_note(&engine, "Install", nativehost::HOST_NAME, &summary, "info", Vec::new()),
+        Err(e) => {
+            log::line(format!("browser bridge: {e}"));
+            status.error = Some(e.to_string());
+        }
+    }
+    status
 }
 
 // ── Activity and audit ────────────────────────────────────────────────────────

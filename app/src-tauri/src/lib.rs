@@ -17,6 +17,7 @@ mod hooks;
 mod island;
 mod localai;
 mod log;
+mod nativehost;
 mod pipe;
 mod platform;
 mod policystore;
@@ -542,6 +543,8 @@ pub fn run() {
             commands::vault_reveal,
             commands::vault_insights,
             commands::vault_copy,
+            commands::native_host_status,
+            commands::native_host_set,
             commands::activity_recent,
             commands::audit_verify,
             commands::audit_open_folder,
@@ -579,6 +582,8 @@ pub fn run() {
             events::spawn_status_watch(&handle);
             commands::register_hotkeys(&handle);
             hooks::ensure_hook_exe(&handle);
+            // After the native host is in place in bin\: the browsers are pointed at it.
+            nativehost::ensure_at_startup(loaded.browser_bridge);
             pipe::start(handle.clone());
             gateway::start(handle.clone());
             localai::warm_up(&handle);

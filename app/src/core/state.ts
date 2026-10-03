@@ -156,6 +156,8 @@ export interface Settings {
   openaiModel: string;
   /** Ollama model used by the chat (independent of the local AI's scan model). */
   ollamaModel: string;
+  /** Zuko registers the browser extension's native host for this user at launch (Settings → Browser). */
+  browserBridge: boolean;
 }
 
 /** Who answers the island chat: Claude and OpenAI get masked text, Ollama stays on this PC. */
@@ -189,6 +191,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "claude-opus-5",
   openaiModel: "gpt-5-mini",
   ollamaModel: "gemma3:4b",
+  browserBridge: true,
 };
 
 /** The model the chat uses with `provider` (the default when the field is blank). */

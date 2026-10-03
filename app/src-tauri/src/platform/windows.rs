@@ -6,8 +6,14 @@ use std::process::Command;
 
 use tauri::{AppHandle, Manager, WebviewWindow};
 
-use ::windows::core::{BOOL, PWSTR};
-use ::windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, HWND, LPARAM, LocalFree, POINT};
+use ::windows::core::{BOOL, PCWSTR, PWSTR};
+use ::windows::Win32::Foundation::{
+    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, HLOCAL, HWND, LPARAM, LocalFree, POINT, WIN32_ERROR,
+};
+use ::windows::Win32::System::Registry::{
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegGetValueW, RegOpenKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+    KEY_READ, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
+};
 use ::windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use ::windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
 use ::windows::Win32::System::Ole::RevokeDragDrop;
@@ -247,6 +253,120 @@ pub fn set_activating(win: &WebviewWindow, activating: bool) {
 
 /// Click-through here is the poll's WS_EX_TRANSPARENT toggle, not a region.
 pub fn set_input_region(_win: &WebviewWindow, _rect: Option<(f64, f64, f64, f64)>) {}
+
+// ── Browser native messaging (HKCU only) ─────────────────────────────────────
+//
+// Chrome-family browsers find a native messaging host through the default value of
+// HKCU\<browser>\NativeMessagingHosts\<host name>, which names the host's manifest file.
+// Only the current user's hive is ever read or written here.
+
+/// Browsers that can start the extension's native host: name, where the browser keeps
+/// its settings under HKCU, and whether to register it even when that key is missing.
+/// Chrome and Edge are the extension's targets and are always registered (a browser that
+/// has not run yet has no key); Chromium and Brave only when they are there.
+pub const NATIVE_MESSAGING_BROWSERS: &[(&str, &str, bool)] = &[
+    ("Chrome", r"Software\Google\Chrome", true),
+    ("Edge", r"Software\Microsoft\Edge", true),
+    ("Chromium", r"Software\Chromium", false),
+    ("Brave", r"Software\BraveSoftware\Brave-Browser", false),
+];
+
+/// Windows browsers are told where the manifest file is (Linux ones get a copy of it).
+pub const NATIVE_MESSAGING_BY_PATH: bool = true;
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn win32(r: WIN32_ERROR) -> std::io::Result<()> {
+    if r == ERROR_SUCCESS {
+        Ok(())
+    } else {
+        Err(std::io::Error::from_raw_os_error(r.0 as i32))
+    }
+}
+
+fn host_key(browser_home: &str, host: &str) -> Vec<u16> {
+    wide(&format!(r"{browser_home}\NativeMessagingHosts\{host}"))
+}
+
+/// The browser has settings for this user (it is installed and has run).
+pub fn native_messaging_browser_present(browser_home: &str) -> bool {
+    let key = wide(browser_home);
+    let mut hkey = HKEY::default();
+    // SAFETY: a read-only open of a key in the user's own hive; closed right away.
+    let r = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(key.as_ptr()), None, KEY_READ, &mut hkey) };
+    if r != ERROR_SUCCESS {
+        return false;
+    }
+    unsafe {
+        let _ = RegCloseKey(hkey);
+    }
+    true
+}
+
+/// What the browser is told about `host` now: the manifest path in the key's default value.
+pub fn native_messaging_read(browser_home: &str, host: &str) -> Option<String> {
+    let key = host_key(browser_home, host);
+    let mut bytes = 0u32;
+    // SAFETY: first call sizes the buffer, second fills it; both read the user's own hive.
+    unsafe { win32(RegGetValueW(HKEY_CURRENT_USER, PCWSTR(key.as_ptr()), PCWSTR::null(), RRF_RT_REG_SZ, None, None, Some(&mut bytes))) }.ok()?;
+    let mut buf = vec![0u16; (bytes as usize).div_ceil(2).max(1)];
+    let mut bytes = (buf.len() * 2) as u32;
+    unsafe {
+        win32(RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key.as_ptr()),
+            PCWSTR::null(),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        ))
+    }
+    .ok()?;
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..len]))
+}
+
+/// Points the browser at the manifest: creates the key and sets its default value.
+pub fn native_messaging_write(browser_home: &str, host: &str, manifest_path: &str) -> std::io::Result<()> {
+    let key = host_key(browser_home, host);
+    let mut hkey = HKEY::default();
+    // SAFETY: creates (or opens) a key under the user's own hive for writing; closed below.
+    unsafe {
+        win32(RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key.as_ptr()),
+            None,
+            PCWSTR::null(),
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE,
+            None,
+            &mut hkey,
+            None,
+        ))?;
+    }
+    let data = wide(manifest_path);
+    // REG_SZ data is the UTF-16 string with its terminating NUL, as bytes.
+    let bytes: Vec<u8> = data.iter().flat_map(|c| c.to_le_bytes()).collect();
+    let set = unsafe { win32(RegSetValueExW(hkey, PCWSTR::null(), None, REG_SZ, Some(&bytes))) };
+    unsafe {
+        let _ = RegCloseKey(hkey);
+    }
+    set
+}
+
+/// Removes the browser's registration of `host` (nothing else). Already gone is fine.
+pub fn native_messaging_remove(browser_home: &str, host: &str) -> std::io::Result<()> {
+    let key = host_key(browser_home, host);
+    // SAFETY: deletes only HKCU\<browser>\NativeMessagingHosts\<host> and what is under it.
+    let r = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(key.as_ptr())) };
+    if r == ERROR_FILE_NOT_FOUND {
+        return Ok(());
+    }
+    win32(r)
+}
 
 /// Full path of the executable on the other end of a connected pipe instance, or
 /// None if Windows will not say. Used to accept hook events only from Zuko's own

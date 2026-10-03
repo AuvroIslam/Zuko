@@ -31,6 +31,15 @@ pub struct Settings {
     /// The Ollama model for the chat (independent of the local AI's scan model).
     #[serde(default = "default_ollama_model")]
     pub ollama_model: String,
+    /// The browser bridge: Zuko registers the extension's native messaging host for this
+    /// user at every launch (nativehost.rs). Off once the user unregisters it in Settings →
+    /// Browser, so it is not quietly put back.
+    #[serde(default = "default_true")]
+    pub browser_bridge: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_model() -> String {
@@ -74,6 +83,7 @@ impl Default for Settings {
             model: default_model(),
             openai_model: default_openai_model(),
             ollama_model: default_ollama_model(),
+            browser_bridge: true,
         }
     }
 }
@@ -164,6 +174,7 @@ mod tests {
         assert_eq!(old.chat_model(Provider::Anthropic), "claude-sonnet-5");
         assert_eq!(old.chat_model(Provider::OpenAi), Provider::OpenAi.default_model());
         assert_eq!(old.chat_model(Provider::Ollama), "gemma3:4b");
+        assert!(old.browser_bridge, "the browser bridge is on unless turned off");
 
         // The new fields round-trip.
         let mut s = Settings { chat_provider: Provider::OpenAi, openai_model: "gpt-4.1".into(), ..Settings::default() };
