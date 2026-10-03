@@ -55,13 +55,14 @@ pub struct ProtectionStatus {
     pub audit_path: String,
 }
 
+/// The totals are today's (local date), counted by the audit log: every receipt as it is
+/// written, and at startup today's receipts already in the log (see `auditlog::Tally`).
 pub fn status_snapshot(app: &AppHandle) -> ProtectionStatus {
-    use std::sync::atomic::Ordering::Relaxed;
     let engine = app.state::<Engine>();
     let installed = hooks::installed_options();
     let gw = gateway::status();
     let policy = engine.policy();
-    let seen = engine.stats.extension_seen.load(Relaxed);
+    let today = auditlog::today();
     ProtectionStatus {
         hooks_installed: installed.hooks,
         hook_ready: hooks::status().hook_ready,
@@ -75,11 +76,11 @@ pub fn status_snapshot(app: &AppHandle) -> ProtectionStatus {
             zuko_core::policy::Mode::Monitor => "monitor".into(),
         },
         vault_size: engine.with_vault(|v| v.len()),
-        masked_total: engine.stats.masked.load(Relaxed),
-        blocked_total: engine.stats.blocked.load(Relaxed),
-        asked_total: engine.stats.asked.load(Relaxed),
-        auto_allowed_total: engine.stats.auto_allowed.load(Relaxed),
-        extension_connected: seen > 0 && engine::now().saturating_sub(seen) < 60,
+        masked_total: today.masked,
+        blocked_total: today.blocked,
+        asked_total: today.asked,
+        auto_allowed_total: today.auto_allowed,
+        extension_connected: engine.stats.extension_connected(engine::now()),
         policy_path: policystore::path().to_string_lossy().to_string(),
         audit_path: auditlog::path().to_string_lossy().to_string(),
     }

@@ -29,20 +29,28 @@ use zuko_core::Ctx;
 
 use crate::{policystore, vaultstore};
 
-/// Counters shown in the UI (since launch).
+/// Live facts the UI shows that no receipt records. (Today's counters — blocked, asked,
+/// auto-allowed, masked — are counted by the audit log, see `auditlog::Tally`.)
 #[derive(Default)]
 pub struct Stats {
-    pub masked: AtomicU64,
-    pub blocked: AtomicU64,
-    pub asked: AtomicU64,
-    pub auto_allowed: AtomicU64,
     /// Unix seconds of the last message from the browser extension.
     pub extension_seen: AtomicU64,
 }
 
+/// The extension says `hello` every 25 s while it is linked; two missed beats in a row
+/// and it counts as gone.
+pub const EXTENSION_FRESH_SECS: u64 = 60;
+
 impl Stats {
-    pub fn add(counter: &AtomicU64, n: u64) {
-        counter.fetch_add(n, Ordering::Relaxed);
+    /// A message from the browser extension arrived just now.
+    pub fn extension_heard(&self) {
+        self.extension_seen.store(now(), Ordering::Relaxed);
+    }
+
+    /// The extension was heard from within the last [`EXTENSION_FRESH_SECS`] at `now`.
+    pub fn extension_connected(&self, now: u64) -> bool {
+        let seen = self.extension_seen.load(Ordering::Relaxed);
+        seen > 0 && now.saturating_sub(seen) < EXTENSION_FRESH_SECS
     }
 }
 

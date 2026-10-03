@@ -68,7 +68,7 @@ New commands (JS argument names are camelCase):
 | `vault_reveal` | `key: string` | `string \| null` (explicit user click only) |
 | `vault_insights` | `key: string` | `{ label: string, text: string }[] \| null` (local, non-sensitive facts: never the value or more than its last four digits; display only) |
 | `vault_copy` | `key: string` | `boolean` (explicit click only; the Rust side copies the value to the clipboard, so it never reaches the webview, and clears it after 30 s only if the clipboard still holds it; audit receipt event `VaultCopy`, keys only) |
-| `open_file` | `path: string` | `boolean` (existing absolute file only; `code --goto <path>` when VS Code is on PATH, else shows the folder; true when VS Code opened it) |
+| `open_file` | `path: string, cwd: string \| null` | `boolean` (existing absolute file only. VS Code on PATH: `code <cwd> --goto <path>` when `cwd` is an existing absolute folder that contains the file, so the window already running that session gets it; otherwise `code --reuse-window --goto <path>`. Each value its own argument, no shell. Without VS Code: shows the folder. True when VS Code opened it) |
 | `activity_recent` | `limit: number` | `ActivityItem[]` (newest first) |
 | `audit_verify` | — | `{ ok: boolean, count: number, error: string \| null }` |
 | `audit_open_folder` | — | `void` |
@@ -117,11 +117,15 @@ interface ProtectionStatus {
   denyRulesInstalled: boolean;
   mode: "enforce" | "monitor";
   vaultSize: number;
-  maskedTotal: number;         // values masked since launch
-  blockedTotal: number;        // actions denied since launch
-  askedTotal: number;
-  autoAllowedTotal: number;
-  extensionConnected: boolean; // a native-host connection was seen in the last 60 s
+  // The four totals are TODAY's (local date; they start again at 0 at midnight). The audit
+  // log counts every receipt as it is written and, at startup, today's receipts already in
+  // the log, so a restart keeps them. Groups follow the activity feed's filters:
+  maskedTotal: number;         // values masked today: each "masked" receipt counts its distinct keys
+                               // (a browser report without known keys: the count it reported)
+  blockedTotal: number;        // denied by policy (deny), by a human (denied_by_user), prompts held back (blocked_prompt)
+  askedTotal: number;          // PreToolUse "ask"
+  autoAllowedTotal: number;    // PreToolUse "allow"
+  extensionConnected: boolean; // the extension was heard from in the last 60 s (it says hello every 25 s while linked)
   policyPath: string;
   auditPath: string;
 }
@@ -142,6 +146,7 @@ interface ActivityItem {
   keys: string[];        // vault keys involved
   aiExplanation?: string; // local AI text, attached when `ai-explain` arrives (display only)
   path?: string;         // absolute file path of a Write/Edit/MultiEdit/NotebookEdit call ("Open file"); live items only, never file contents
+  cwd?: string;          // the session's absolute working folder, only next to `path` (passed to open_file)
 }
 
 interface SanitizeResult {
@@ -249,7 +254,7 @@ was shown, labels are Zuko's own, and failures fall back to the deterministic re
 | `hook` | island | the hook payload (UI copy: strings truncated to 2000 chars) + `request_id` for PermissionRequest + **`zuko`** (below) |
 | `activity` | all windows | `ActivityItem` |
 | `privacy` | all windows | `PrivacyEvent` |
-| `protection-changed` | all windows | `ProtectionStatus` |
+| `protection-changed` | all windows | `ProtectionStatus` — after any change to what is protected, after decisions and maskings (throttled: at most 4 a second, the last change of a burst always followed by one), when the extension connects or falls silent, and at midnight |
 | `ai-explain` | all windows | `{ requestId: string \| null, activityId: string \| null, text: string, model: string }` — a local AI explanation for an approval card (`requestId`) or a feed item (`activityId`); display only, labelled "AI explanation" |
 | `settings-changed`, `tray`, `screen-changed`, `cursor` | unchanged | unchanged |
 

@@ -15,6 +15,11 @@
 //   mask; the log adds nothing of its own).
 // * The ring of the last 500 activity items is seeded from the log's last receipts at
 //   startup, so the island's feed is not empty after a restart.
+// * Today's counters (blocked, asked, auto-allowed, masked: `ProtectionStatus` in
+//   CONTRACTS.md) are the log's own view of the day. Every receipt is counted the moment
+//   it is appended, by the same rule (`Tally::of`) that counts today's receipts in the
+//   file at startup, so a restart shows exactly what was shown before it. The counters
+//   start again at zero when the local date changes.
 //
 // A log that cannot be written never fails the caller: the receipt is returned sealed
 // as usual and the problem is reported once in zuko.log until a write succeeds again.
@@ -42,6 +47,99 @@ pub fn path() -> PathBuf {
     crate::settings::local_dir().join("audit").join("audit.jsonl")
 }
 
+// ── Today's counters ──────────────────────────────────────────────────────────
+
+/// What receipts add up to on the counters the island and the settings window show.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tally {
+    /// Values masked: each masking counts the distinct values it replaced.
+    pub masked: u64,
+    /// Actions denied by the policy, by a human on the island, and prompts held back.
+    pub blocked: u64,
+    /// Actions Zuko asked about.
+    pub asked: u64,
+    /// Low-risk actions Zuko allowed by itself.
+    pub auto_allowed: u64,
+}
+
+impl Tally {
+    /// What one receipt adds. The groups follow the activity feed's filters: a receipt
+    /// the feed lists under "Blocked" counts as blocked, and so on.
+    pub fn of(r: &Receipt) -> Tally {
+        let mut t = Tally::default();
+        match r.verdict.as_str() {
+            "deny" | "denied_by_user" | "blocked_prompt" => t.blocked = 1,
+            "ask" => t.asked = 1,
+            "allow" if r.event == "PreToolUse" => t.auto_allowed = 1,
+            "masked" => t.masked = masked_values(r),
+            _ => {}
+        }
+        t
+    }
+
+    pub fn add(&mut self, other: Tally) {
+        self.masked += other.masked;
+        self.blocked += other.blocked;
+        self.asked += other.asked;
+        self.auto_allowed += other.auto_allowed;
+    }
+}
+
+/// Distinct values a masking receipt stands for: its vault keys. A browser report can name
+/// values the app's vault has never seen (the extension masked them on its own), so it
+/// keeps no keys; its summary, written by `firewall::browser_event` as `<kind> (<count>)`,
+/// still says how many.
+fn masked_values(r: &Receipt) -> u64 {
+    if !r.keys.is_empty() {
+        return r.keys.len() as u64;
+    }
+    let reported = (r.event == "Browser")
+        .then(|| r.summary.rsplit_once(" (")?.1.strip_suffix(')')?.parse::<u64>().ok())
+        .flatten();
+    reported.unwrap_or(1)
+}
+
+/// A local calendar day: `date` (yyyymmdd) tells days apart; `start`, the Unix time of
+/// that day's local midnight, says which receipts belong to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Day {
+    pub date: u32,
+    pub start: u64,
+}
+
+impl Day {
+    /// Today, in the user's time zone.
+    pub fn now() -> Day {
+        let now = crate::engine::now();
+        let t = crate::platform::local_time();
+        Day::at(now, &t)
+    }
+
+    /// The day `local` falls on, given the Unix time `now` of that same moment. On the day
+    /// a clock change happens `start` is off by that hour, which only decides whether a
+    /// receipt from right around midnight is counted at startup; `date` is exact.
+    pub fn at(now: u64, local: &crate::platform::LocalTime) -> Day {
+        let since_midnight = u64::from(local.hour) * 3600 + u64::from(local.minute) * 60 + u64::from(local.second);
+        Day { date: local.year * 10_000 + local.month * 100 + local.day, start: now.saturating_sub(since_midnight) }
+    }
+}
+
+/// Receipt timestamps are Unix seconds; a writer that used milliseconds is tolerated.
+fn ts_secs(ts: u64) -> u64 {
+    if ts > 100_000_000_000 {
+        ts / 1000
+    } else {
+        ts
+    }
+}
+
+type Clock = Box<dyn Fn() -> Day + Send + Sync>;
+
+struct Today {
+    date: u32,
+    tally: Tally,
+}
+
 struct State {
     next_seq: u64,
     last_hash: String,
@@ -59,17 +157,27 @@ pub struct AuditLog {
     state: Mutex<State>,
     ring: Mutex<VecDeque<ActivityItem>>,
     written: AtomicU64,
+    clock: Clock,
+    today: Mutex<Today>,
 }
 
 impl AuditLog {
-    /// Opens (or starts) the log at `file`: resumes the chain from its tail and seeds
-    /// the activity ring.
+    /// Opens (or starts) the log at `file`: resumes the chain from its tail, seeds the
+    /// activity ring and counts today's receipts.
     pub fn open(file: PathBuf, rotate_at: u64) -> AuditLog {
+        AuditLog::open_with(file, rotate_at, TAIL_BYTES, Box::new(Day::now))
+    }
+
+    /// [`AuditLog::open`] with the tail size and the calendar made explicit (tests).
+    fn open_with(file: PathBuf, rotate_at: u64, tail_bytes: u64, clock: Clock) -> AuditLog {
         let mut state = State { next_seq: 1, last_hash: GENESIS.to_string(), size: 0, warned: false, rotate_failed: false };
         let mut ring = VecDeque::new();
-        match read_tail(&file) {
-            Ok(Some(tail)) => {
-                let tail = repair_tail(&file, tail);
+        let day = clock();
+        let mut tally = Tally::default();
+        match read_tail(&file, tail_bytes) {
+            Ok(Some(raw)) => {
+                let whole_file = raw.1 == 0;
+                let tail = repair_tail(&file, raw);
                 state.size = tail.file_len;
                 let receipts = parse_receipts(&tail.text);
                 if let Some(last) = receipts.last() {
@@ -85,16 +193,62 @@ impl AuditLog {
                 while ring.len() > RING {
                     ring.pop_front();
                 }
+                tally = tally_since(&file, &receipts, whole_file, day.start);
             }
-            Ok(None) => {}
+            Ok(None) => tally = tally_rotated_since(&file, day.start),
             Err(e) => crate::log::line(format!("audit log unreadable at start ({}): {e}", file.display())),
         }
-        AuditLog { file, rotate_at, state: Mutex::new(state), ring: Mutex::new(ring), written: AtomicU64::new(0) }
+        AuditLog {
+            file,
+            rotate_at,
+            state: Mutex::new(state),
+            ring: Mutex::new(ring),
+            written: AtomicU64::new(0),
+            clock,
+            today: Mutex::new(Today { date: day.date, tally }),
+        }
+    }
+
+    /// Today's counters, locked, after starting the new day's at zero if the local date
+    /// changed since they were last touched (the flag says it did).
+    fn current_day(&self) -> (std::sync::MutexGuard<'_, Today>, bool) {
+        let day = (self.clock)();
+        let mut today = self.today.lock().unwrap_or_else(|e| e.into_inner());
+        let rolled = today.date != day.date;
+        if rolled {
+            *today = Today { date: day.date, tally: Tally::default() };
+        }
+        (today, rolled)
+    }
+
+    /// Today's counters.
+    pub fn today(&self) -> Tally {
+        self.current_day().0.tally
+    }
+
+    /// Starts a new day's counters if the date changed. True when it did (the UI then
+    /// has new numbers to show).
+    pub fn roll_day(&self) -> bool {
+        self.current_day().1
+    }
+
+    fn count_today(&self, receipt: &Receipt) {
+        let add = Tally::of(receipt);
+        if add != Tally::default() {
+            self.current_day().0.tally.add(add);
+        }
     }
 
     /// Seals `receipt` (seq, prev_hash, hash) and appends it to the log. The caller
-    /// gets the sealed receipt back even if the write failed.
-    pub fn append(&self, mut receipt: Receipt) -> Receipt {
+    /// gets the sealed receipt back even if the write failed. Either way it counts on
+    /// today's counters: the decision it records was made.
+    pub fn append(&self, receipt: Receipt) -> Receipt {
+        let receipt = self.seal_and_write(receipt);
+        self.count_today(&receipt);
+        receipt
+    }
+
+    fn seal_and_write(&self, mut receipt: Receipt) -> Receipt {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if st.size > 0 && st.size >= self.rotate_at && !st.rotate_failed {
             self.rotate(&mut st);
@@ -239,15 +393,16 @@ struct Tail {
     file_len: u64,
 }
 
-/// The last `TAIL_BYTES` of the file; `None` when there is no file.
-fn read_tail(file: &Path) -> std::io::Result<Option<(Vec<u8>, u64, u64)>> {
+/// The last `tail_bytes` of the file, where they start and the file's length; `None`
+/// when there is no file.
+fn read_tail(file: &Path, tail_bytes: u64) -> std::io::Result<Option<(Vec<u8>, u64, u64)>> {
     let mut f = match std::fs::File::open(file) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
     let len = f.metadata()?.len();
-    let start = len.saturating_sub(TAIL_BYTES);
+    let start = len.saturating_sub(tail_bytes);
     f.seek(SeekFrom::Start(start))?;
     let mut buf = Vec::with_capacity((len - start) as usize);
     f.read_to_end(&mut buf)?;
@@ -295,6 +450,54 @@ fn parse_receipts(text: &str) -> Vec<Receipt> {
     text.lines().filter_map(|l| serde_json::from_str::<Receipt>(l).ok()).collect()
 }
 
+/// Today's receipts (stamped at or after `since`), counted.
+///
+/// The tail read at startup nearly always holds the whole day. When it does not (a busy
+/// day, or the log rotated today), the rest of the active file is read, then the rotated
+/// files newest first, until a receipt from before `since` shows the day's beginning.
+fn tally_since(active: &Path, tail: &[Receipt], tail_is_whole_file: bool, since: u64) -> Tally {
+    let (mut tally, mut reached) = count_since(tail, since);
+    if !reached && !tail_is_whole_file {
+        match std::fs::read_to_string(active) {
+            Ok(text) => (tally, reached) = count_since(&parse_receipts(&text), since),
+            Err(e) => crate::log::line(format!("audit log: today's counters may be short ({e})")),
+        }
+    }
+    if !reached {
+        tally.add(tally_rotated_since(active, since));
+    }
+    tally
+}
+
+/// Today's receipts in the rotated logs next to `active`, newest file first.
+fn tally_rotated_since(active: &Path, since: u64) -> Tally {
+    let mut tally = Tally::default();
+    for file in rotated_files(active).iter().rev() {
+        let Ok(text) = std::fs::read_to_string(file) else { break };
+        let (t, reached) = count_since(&parse_receipts(&text), since);
+        tally.add(t);
+        if reached {
+            break;
+        }
+    }
+    tally
+}
+
+/// The tally of the receipts stamped at or after `since`, and whether an older one
+/// (the day's start) was among them.
+fn count_since(receipts: &[Receipt], since: u64) -> (Tally, bool) {
+    let mut tally = Tally::default();
+    let mut reached = false;
+    for r in receipts {
+        if ts_secs(r.ts) >= since {
+            tally.add(Tally::of(r));
+        } else {
+            reached = true;
+        }
+    }
+    (tally, reached)
+}
+
 /// `audit-<ts>.jsonl` files next to the active log, oldest first.
 fn rotated_files(active: &Path) -> Vec<PathBuf> {
     let Some(dir) = active.parent() else { return Vec::new() };
@@ -336,6 +539,7 @@ fn item_from_receipt(r: &Receipt) -> ActivityItem {
         keys: r.keys.clone(),
         ai_explanation: None,
         path: None,
+        cwd: None,
     }
 }
 
@@ -381,6 +585,16 @@ pub fn verify() -> Result<u64, String> {
 /// Number of receipts written since launch.
 pub fn count() -> u64 {
     global().count()
+}
+
+/// Today's counters (see [`Tally`]).
+pub fn today() -> Tally {
+    global().today()
+}
+
+/// See [`AuditLog::roll_day`].
+pub fn roll_day() -> bool {
+    global().roll_day()
 }
 
 #[cfg(test)]
@@ -587,5 +801,152 @@ mod tests {
         assert_eq!((r2.seq, r2.prev_hash.as_str()), (1, GENESIS));
         assert_eq!(log.verify(), Ok(1));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── Today's counters ──
+
+    /// Local midnight of the made-up day the tests live on.
+    const MIDNIGHT: u64 = 1_790_000_000;
+
+    /// A calendar the test turns by hand.
+    fn calendar(date: u32, start: u64) -> (Arc<Mutex<Day>>, Clock) {
+        let day = Arc::new(Mutex::new(Day { date, start }));
+        let read = day.clone();
+        (day, Box::new(move || *read.lock().unwrap()))
+    }
+
+    fn at(ts: u64, event: &str, verdict: &str, keys: &[&str]) -> Receipt {
+        Receipt {
+            ts,
+            event: event.into(),
+            tool: "Bash".into(),
+            summary: "step".into(),
+            verdict: verdict.into(),
+            tier: "low".into(),
+            keys: keys.iter().map(|k| k.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn receipts_count_like_the_activity_filters() {
+        let t = |r: Receipt| Tally::of(&r);
+        let one = |f: fn(&mut Tally)| {
+            let mut x = Tally::default();
+            f(&mut x);
+            x
+        };
+        assert_eq!(t(at(1, "PreToolUse", "deny", &[])), one(|x| x.blocked = 1));
+        assert_eq!(t(at(1, "PermissionRequest", "denied_by_user", &[])), one(|x| x.blocked = 1));
+        assert_eq!(t(at(1, "UserPromptSubmit", "blocked_prompt", &["API_KEY_1"])), one(|x| x.blocked = 1));
+        assert_eq!(t(at(1, "Browser", "blocked_prompt", &[])), one(|x| x.blocked = 1));
+        assert_eq!(t(at(1, "PreToolUse", "ask", &[])), one(|x| x.asked = 1));
+        assert_eq!(t(at(1, "PreToolUse", "allow", &[])), one(|x| x.auto_allowed = 1));
+        // Each masking counts the distinct values it replaced.
+        assert_eq!(t(at(1, "Gateway", "masked", &["API_KEY_1", "EMAIL_1"])), one(|x| x.masked = 2));
+        assert_eq!(t(at(1, "PostToolUse", "masked", &["API_KEY_1"])), one(|x| x.masked = 1));
+        // A browser report of values the app never saw says how many in its summary.
+        let mut browser = at(1, "Browser", "masked", &[]);
+        browser.summary = "masked (3)".into();
+        assert_eq!(t(browser.clone()), one(|x| x.masked = 3));
+        browser.summary = "upload (2)".into();
+        assert_eq!(t(browser), one(|x| x.masked = 2));
+        // Approvals by a human, restores, notes and rotation markers are not counted.
+        for (event, verdict) in [
+            ("PermissionRequest", "approved"),
+            ("Gateway", "rehydrated"),
+            ("PreToolUse", "defer"),
+            ("Policy", "info"),
+            ("Vault", "allow"),
+            (ROTATE_EVENT, "info"),
+        ] {
+            assert_eq!(t(at(1, event, verdict, &["API_KEY_1"])), Tally::default(), "{event} {verdict}");
+        }
+    }
+
+    #[test]
+    fn todays_counters_survive_a_restart_and_start_over_at_midnight() {
+        let dir = tmp("today");
+        let file = dir.join("audit.jsonl");
+        let (day, clock) = calendar(20260918, MIDNIGHT);
+        let first = AuditLog::open_with(file.clone(), ROTATE_AT, TAIL_BYTES, clock);
+        assert_eq!(first.today(), Tally::default(), "no log yet");
+        // Yesterday evening, then today.
+        first.append(at(MIDNIGHT - 600, "PreToolUse", "deny", &[]));
+        first.append(at(MIDNIGHT - 5, "PreToolUse", "ask", &[]));
+        first.append(at(MIDNIGHT + 10, "PreToolUse", "deny", &[]));
+        first.append(at(MIDNIGHT + 20, "PreToolUse", "ask", &[]));
+        first.append(at(MIDNIGHT + 30, "PreToolUse", "allow", &[]));
+        first.append(at(MIDNIGHT + 40, "PreToolUse", "allow", &[]));
+        first.append(at(MIDNIGHT + 50, "Gateway", "masked", &["API_KEY_1", "EMAIL_1"]));
+        first.append(at(MIDNIGHT + 60, "PostToolUse", "masked", &["API_KEY_1"]));
+        first.append(at(MIDNIGHT + 70, "Gateway", "rehydrated", &["API_KEY_1"]));
+        let today = Tally { masked: 3, blocked: 1, asked: 1, auto_allowed: 2 };
+
+        // A restart counts what the log holds for today, and only that.
+        let (_, clock) = calendar(20260918, MIDNIGHT);
+        let second = AuditLog::open_with(file.clone(), ROTATE_AT, TAIL_BYTES, clock);
+        assert_eq!(second.today(), today);
+        // Live receipts add to it.
+        second.append(at(MIDNIGHT + 80, "PermissionRequest", "denied_by_user", &[]));
+        assert_eq!(second.today().blocked, 2);
+        // Seconds in the log are seconds; a millisecond stamp from an older writer still counts.
+        second.append(at((MIDNIGHT + 90) * 1000, "PreToolUse", "ask", &[]));
+        let (_, clock) = calendar(20260918, MIDNIGHT);
+        assert_eq!(AuditLog::open_with(file.clone(), ROTATE_AT, TAIL_BYTES, clock).today().asked, 2);
+
+        // Midnight: the counters start again, once.
+        let (next, clock) = calendar(20260918, MIDNIGHT);
+        let third = AuditLog::open_with(file.clone(), ROTATE_AT, TAIL_BYTES, clock);
+        assert_eq!(third.today().blocked, 2);
+        *next.lock().unwrap() = Day { date: 20260919, start: MIDNIGHT + 86_400 };
+        assert!(third.roll_day());
+        assert!(!third.roll_day());
+        assert_eq!(third.today(), Tally::default());
+        third.append(at(MIDNIGHT + 86_400 + 5, "PreToolUse", "ask", &[]));
+        assert_eq!(third.today(), Tally { asked: 1, ..Tally::default() });
+        // A receipt written just as the date turns lands on the new day, read lazily.
+        *day.lock().unwrap() = Day { date: 20260919, start: MIDNIGHT + 86_400 };
+        first.append(at(MIDNIGHT + 86_400 + 6, "PreToolUse", "deny", &[]));
+        assert_eq!(first.today(), Tally { blocked: 1, ..Tally::default() });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_day_longer_than_the_tail_and_across_rotations_is_counted_whole() {
+        let dir = tmp("busy");
+        let file = dir.join("audit.jsonl");
+        // A tail of ~1 receipt and rotation every few: today spans several files.
+        let tail = 700;
+        let (_, clock) = calendar(20260918, MIDNIGHT);
+        let log = AuditLog::open_with(file.clone(), 1500, tail, clock);
+        log.append(at(MIDNIGHT - 100, "PreToolUse", "deny", &[]));
+        for i in 0..14 {
+            log.append(at(MIDNIGHT + i, "PreToolUse", "ask", &[]));
+        }
+        log.append(at(MIDNIGHT + 99, "Gateway", "masked", &["API_KEY_1"]));
+        assert!(rotated_files(&file).len() >= 2, "the test needs several rotated files");
+        assert!(std::fs::metadata(&file).unwrap().len() > tail, "and a tail that misses part of today");
+
+        let (_, clock) = calendar(20260918, MIDNIGHT);
+        let again = AuditLog::open_with(file.clone(), 1500, tail, clock);
+        assert_eq!(again.today(), Tally { asked: 14, masked: 1, ..Tally::default() });
+        // The chain itself is untouched by the counting.
+        assert!(again.verify().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_day_starts_at_local_midnight() {
+        use crate::platform::LocalTime;
+        let t = LocalTime { year: 2026, month: 10, day: 3, hour: 14, minute: 5, second: 9 };
+        let now = 1_790_000_000;
+        let d = Day::at(now, &t);
+        assert_eq!(d.date, 20261003);
+        assert_eq!(d.start, now - (14 * 3600 + 5 * 60 + 9));
+        let midnight = LocalTime { hour: 0, minute: 0, second: 0, ..t };
+        assert_eq!(Day::at(now, &midnight).start, now);
     }
 }

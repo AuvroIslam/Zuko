@@ -368,7 +368,7 @@ class AppState {
         : !on
           ? "Gateway off — hooks-only mode"
           : p.gatewayRunning
-            ? `Gateway on · ${p.maskedTotal} value${p.maskedTotal === 1 ? "" : "s"} masked since launch`
+            ? `Gateway on · ${p.maskedTotal} value${p.maskedTotal === 1 ? "" : "s"} masked today`
             : "Gateway configured but not running";
       if (resting(gateway)) gateway.state = !on ? "sleeping" : p!.gatewayRunning ? "idle" : "error";
     }
@@ -387,7 +387,7 @@ class AppState {
       policy.pillMeta = p?.mode === "monitor" ? "monitor" : `${blocked}`;
       policy.pillTitle = p?.mode === "monitor"
         ? "Monitor mode — nothing is blocked, everything is logged"
-        : `${blocked} action${blocked === 1 ? "" : "s"} blocked since launch`;
+        : `${blocked} action${blocked === 1 ? "" : "s"} blocked today`;
       if (resting(policy)) policy.state = "idle";
     }
 
@@ -397,7 +397,7 @@ class AppState {
       claude.pillMeta = p && !p.hooksInstalled ? "off" : asked > 0 ? `${asked}` : null;
       claude.pillTitle = p && !p.hooksInstalled
         ? "Hooks not installed"
-        : `${asked} approval${asked === 1 ? "" : "s"} asked since launch`;
+        : `${asked} approval${asked === 1 ? "" : "s"} asked today`;
     }
   }
 

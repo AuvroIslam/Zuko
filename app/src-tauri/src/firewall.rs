@@ -46,7 +46,7 @@ use zuko_core::policy::{Mode, Policy, RuleVerdict};
 use zuko_core::taint::Violation;
 use zuko_core::vault::Vault;
 
-use crate::engine::{self, Engine, Stats};
+use crate::engine::{self, Engine};
 use crate::events::{self, ActivityItem, PrivacyEvent};
 use crate::localai::{self, AiJob, ExplainInput};
 
@@ -90,7 +90,9 @@ impl Outcome {
         Outcome { stdout, ..Default::default() }
     }
 
-    /// Emits the UI events, appends the receipts and persists the vault.
+    /// Emits the UI events, appends the receipts and persists the vault. Receipts move
+    /// today's counters and new vault entries the vault size, so either one is followed by
+    /// a (throttled) `protection-changed`.
     pub fn apply(&self, app: &AppHandle) {
         for e in &self.events {
             match e {
@@ -103,6 +105,9 @@ impl Outcome {
         }
         if self.persist_vault {
             app.state::<Engine>().persist_vault();
+        }
+        if !self.receipts.is_empty() || self.persist_vault {
+            events::protection_changed_soon(app);
         }
         for job in &self.ai {
             localai::spawn(app, job.clone());
@@ -185,6 +190,8 @@ pub async fn handle_extension(app: &AppHandle, message: &Value) -> Value {
     match str_at(msg, "op") {
         "deepScan" => {
             let engine = app.state::<Engine>();
+            engine.stats.extension_heard();
+            events::extension_heard(app);
             let r = deep_scan_op(&engine, msg).await;
             if let Some(job) = r.job {
                 localai::spawn(app, job);
@@ -196,6 +203,8 @@ pub async fn handle_extension(app: &AppHandle, message: &Value) -> Value {
         }
         "policy" => {
             let engine = app.state::<Engine>();
+            engine.stats.extension_heard();
+            events::extension_heard(app);
             return policy_op(&engine).await;
         }
         _ => {}
@@ -206,6 +215,9 @@ pub async fn handle_extension(app: &AppHandle, message: &Value) -> Value {
         .await
         .unwrap_or_default();
     out.apply(app);
+    // The first message after a quiet spell (the heartbeat included) turns the Browser
+    // pill on; `events::spawn_status_watch` turns it off again.
+    events::extension_heard(app);
     out.stdout.unwrap_or_else(|| json!({ "ok": false, "error": "internal error" }))
 }
 
@@ -324,7 +336,6 @@ fn pre_tool_use(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
         d.reason_user = format!("{} — {}", d.risk.tier.as_str(), d.risk.headline);
     }
 
-    count_verdict(&engine.stats, d.verdict);
     let rules = rules_of(&d);
     let mut keys = d.rehydrated.clone();
     for k in mask::keys_in_json(&vault, &input) {
@@ -343,6 +354,7 @@ fn pre_tool_use(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
     let mut out = Outcome::reply(hookio::pre_tool_use(&d));
     out.zuko = Some(zuko_info(&d));
     let activity_id = events::next_id();
+    let path = edited_path(tool, &input, cwd);
     if matches!(d.verdict, Verdict::Ask | Verdict::Deny) && engine.policy().local_ai.explains() {
         out.ai.push(AiJob::Explain {
             input: explain_input(&vault, &det, tool, &d),
@@ -365,7 +377,8 @@ fn pre_tool_use(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
         rules: rules.clone(),
         keys: keys.clone(),
         ai_explanation: None,
-        path: edited_path(tool, &input, cwd),
+        cwd: open_file_cwd(cwd, &path),
+        path,
     }));
     if !d.rehydrated.is_empty() {
         out.events.push(UiEvent::Privacy(PrivacyEvent {
@@ -470,7 +483,6 @@ fn post_tool_use(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
         output.entry(field.to_string()).or_insert(default);
     }
 
-    Stats::add(&engine.stats.masked, report.count as u64);
     let vault = engine.vault_snapshot();
     let summary = clip(&redact(&action.summary, &vault, &det), SUMMARY_MAX);
     let mut out = Outcome::reply(Some(hookio::post_tool_use_output(
@@ -504,6 +516,7 @@ fn post_tool_use(engine: &Engine, facts: &Facts, payload: &Value) -> Outcome {
         keys: report.keys.clone(),
         ai_explanation: None,
         path: None,
+        cwd: None,
     }));
     out.receipts.push(Receipt {
         ts: engine::now(),
@@ -597,6 +610,7 @@ probably a project setting), so prompts are not masked. Zuko still blocks prompt
             keys: Vec::new(),
             ai_explanation: None,
             path: None,
+            cwd: None,
         }));
     }
 
@@ -625,11 +639,11 @@ probably a project setting), so prompts are not masked. Zuko still blocks prompt
                 keys: report.keys,
                 ai_explanation: None,
                 path: None,
+                cwd: None,
             }));
             return out;
         }
 
-        Stats::add(&engine.stats.masked, report.count as u64);
         let reason = blocked_prompt_reason(&labels, &report.keys, warning.is_some() || !facts.gateway_url.is_empty());
         out.stdout = Some(hookio::user_prompt_block(&reason, true));
         out.events.push(UiEvent::Privacy(PrivacyEvent {
@@ -658,6 +672,7 @@ probably a project setting), so prompts are not masked. Zuko still blocks prompt
             keys: report.keys.clone(),
             ai_explanation: None,
             path: None,
+            cwd: None,
         }));
         out.receipts.push(Receipt {
             ts: engine::now(),
@@ -806,6 +821,12 @@ fn edited_path(tool: &str, input: &Value, cwd: &str) -> Option<String> {
     Some(full.to_string_lossy().into_owned())
 }
 
+/// The session folder to go with an "Open file" path (see `vscode.rs`): only next to a
+/// path, and only when it is absolute. Nothing else about the session is kept.
+fn open_file_cwd(cwd: &str, path: &Option<String>) -> Option<String> {
+    (path.is_some() && !cwd.is_empty() && std::path::Path::new(cwd).is_absolute()).then(|| cwd.to_string())
+}
+
 /// The receipt, feed item and stats for a human decision on the island.
 pub fn permission_outcome(engine: &Engine, payload: &Value, info: Option<&Value>, allow: bool, elapsed_ms: Option<u64>) -> Outcome {
     let tool = str_at(payload, "tool_name");
@@ -820,9 +841,6 @@ pub fn permission_outcome(engine: &Engine, payload: &Value, info: Option<&Value>
     let action = zuko_core::action::from_tool_call(tool, &input, &ctx);
 
     let verdict = if allow { "approved" } else { "denied" };
-    if !allow {
-        Stats::add(&engine.stats.blocked, 1);
-    }
     let field = |k: &str| info.and_then(|i| i.get(k));
     let tier = field("tier").and_then(Value::as_str).unwrap_or("low").to_string();
     let score = field("score").and_then(Value::as_u64).unwrap_or(0).min(100) as u8;
@@ -838,6 +856,7 @@ pub fn permission_outcome(engine: &Engine, payload: &Value, info: Option<&Value>
     }
 
     let mut out = Outcome::default();
+    let path = edited_path(tool, &input, cwd);
     out.events.push(UiEvent::Activity(ActivityItem {
         id: events::next_id(),
         ts: engine::now_ms(),
@@ -853,7 +872,8 @@ pub fn permission_outcome(engine: &Engine, payload: &Value, info: Option<&Value>
         rules: rules.clone(),
         keys: keys.clone(),
         ai_explanation: None,
-        path: edited_path(tool, &input, cwd),
+        cwd: open_file_cwd(cwd, &path),
+        path,
     }));
     out.receipts.push(Receipt {
         ts: engine::now(),
@@ -879,7 +899,7 @@ pub fn extension(engine: &Engine, message: &Value) -> Outcome {
     // A message from the native host is wrapped as {"message": {...}}; a bare
     // message is accepted too.
     let msg = message.get("message").filter(|m| m.is_object()).unwrap_or(message);
-    engine.stats.extension_seen.store(engine::now(), std::sync::atomic::Ordering::Relaxed);
+    engine.stats.extension_heard();
     let det = engine.detector();
     let mut out = Outcome::default();
     let reply = match str_at(msg, "op") {
@@ -888,8 +908,13 @@ pub fn extension(engine: &Engine, message: &Value) -> Outcome {
             let text = str_at(msg, "text");
             let mctx = MaskCtx { source: "browser".into(), now: engine::now() };
             let (masked, report) = engine.with_vault(|v| mask::mask_text(&det, v, text, &mctx));
-            Stats::add(&engine.stats.masked, report.count as u64);
             out.persist_vault = !report.new_keys.is_empty();
+            // The extension does not report what the app masked for it (it would be a
+            // duplicate), so the app records it here exactly as it records the extension's
+            // own report of a local masking: feed, notice, receipt, today's counter.
+            if report.count > 0 {
+                browser_report(engine, "masked", str_at(msg, "site"), report.count, report.keys.clone(), &mut out);
+            }
             json!({ "ok": true, "text": masked, "report": report })
         }
         "rehydrate" => {
@@ -915,16 +940,23 @@ pub fn extension(engine: &Engine, message: &Value) -> Outcome {
 }
 
 fn browser_event(engine: &Engine, msg: &Value, out: &mut Outcome) {
-    let kind = str_at(msg, "kind");
-    let site = clip(str_at(msg, "site"), 120);
-    let count = msg.get("count").and_then(Value::as_u64).unwrap_or(0) as usize;
-    let vault = engine.vault_snapshot();
-    // Only keys the vault knows are reported, so the page cannot inject text.
     let keys: Vec<String> = msg
         .get("keys")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).filter(|k| vault.get(k).is_some()).map(str::to_string).collect())
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
         .unwrap_or_default();
+    let count = msg.get("count").and_then(Value::as_u64).unwrap_or(0) as usize;
+    browser_report(engine, str_at(msg, "kind"), str_at(msg, "site"), count, keys, out);
+}
+
+/// A masking, block or upload on a web chat: privacy notice, feed item and receipt. The
+/// receipt's summary, `<kind> (<count>)`, is what `auditlog::Tally` reads back when the
+/// keys cannot say how many values there were.
+fn browser_report(engine: &Engine, kind: &str, site: &str, count: usize, keys: Vec<String>, out: &mut Outcome) {
+    let site = clip(site, 120);
+    let vault = engine.vault_snapshot();
+    // Only keys the vault knows are reported, so the page cannot inject text.
+    let keys: Vec<String> = keys.into_iter().filter(|k| vault.get(k).is_some()).collect();
     let (direction, verdict, headline) = match kind {
         "blocked" => ("blocked_prompt", "blocked_prompt", format!("Blocked a message to {site} that carried a secret")),
         "upload" => ("masked", "masked", format!("Sanitized a file uploaded to {site}")),
@@ -956,6 +988,7 @@ fn browser_event(engine: &Engine, msg: &Value, out: &mut Outcome) {
         keys: keys.clone(),
         ai_explanation: None,
         path: None,
+        cwd: None,
     }));
     out.receipts.push(Receipt {
         ts: engine::now(),
@@ -1004,15 +1037,6 @@ fn rules_of(d: &Decision) -> Vec<String> {
         }
     }
     rules
-}
-
-fn count_verdict(stats: &Stats, verdict: Verdict) {
-    match verdict {
-        Verdict::Deny => Stats::add(&stats.blocked, 1),
-        Verdict::Ask => Stats::add(&stats.asked, 1),
-        Verdict::Allow => Stats::add(&stats.auto_allowed, 1),
-        Verdict::Defer => {}
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1177,12 +1201,20 @@ fn forget_warned(sid: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auditlog::Tally;
     use crate::engine::CtxBase;
     use std::sync::atomic::Ordering::Relaxed;
     use std::time::Duration;
 
     const KEY: &str = "sk-proj-abcdefghijklmnopqrstuvwx1234";
     const CWD: &str = "C:\\Users\\a\\proj";
+
+    /// What an outcome's receipts add to today's counters once applied.
+    fn tally(out: &Outcome) -> Tally {
+        let mut t = Tally::default();
+        out.receipts.iter().for_each(|r| t.add(Tally::of(r)));
+        t
+    }
 
     fn engine_with(vault: Vault) -> Engine {
         let base = CtxBase {
@@ -1261,7 +1293,7 @@ mod tests {
         let item = activity(&out);
         assert_eq!(item.verdict, "deny");
         assert!(item.rules.iter().any(|r| r.starts_with("network.blocked")), "{:?}", item.rules);
-        assert_eq!(e.stats.blocked.load(Relaxed), 1);
+        assert_eq!(tally(&out), Tally { blocked: 1, ..Tally::default() });
         let r = &out.receipts[0];
         assert_eq!(r.verdict, "deny");
         assert_eq!(r.input_sha256.len(), 64);
@@ -1280,17 +1312,17 @@ mod tests {
         assert!(reason.to_uppercase().contains("HIGH") || reason.to_uppercase().contains("CRITICAL"), "{reason}");
         assert!(reason.contains("build"), "{reason}");
         assert_eq!(out.zuko.as_ref().unwrap()["friction"]["type"], "hold");
-        assert_eq!(e.stats.asked.load(Relaxed), 1);
+        assert_eq!(tally(&out), Tally { asked: 1, ..Tally::default() });
     }
 
     #[test]
     fn low_risk_is_auto_allowed() {
         let e = engine();
-        let out = process(&e, &hooks_only(), &pre("Bash", json!({"command": "ls"})));
-        assert_eq!(decision_of(&out).0, "allow");
+        let ls = process(&e, &hooks_only(), &pre("Bash", json!({"command": "ls"})));
+        assert_eq!(decision_of(&ls).0, "allow");
         let out = process(&e, &hooks_only(), &pre("Read", json!({"file_path": format!("{CWD}\\src\\main.rs")})));
         assert_eq!(decision_of(&out).0, "allow");
-        assert_eq!(e.stats.auto_allowed.load(Relaxed), 2);
+        assert_eq!(tally(&ls).auto_allowed + tally(&out).auto_allowed, 2);
         assert_eq!(activity(&out).tier, "low");
     }
 
@@ -1300,9 +1332,19 @@ mod tests {
         let target = format!("{CWD}/src/main.rs");
         let out = process(&e, &hooks_only(), &pre("Edit", json!({"file_path": target, "old_string": "a", "new_string": "b"})));
         assert_eq!(activity(&out).path.as_deref(), Some(target.as_str()));
+        // The session folder rides along, so VS Code opens the file in that project's window.
+        assert_eq!(activity(&out).cwd.as_deref(), Some(CWD));
         // Only the editing tools; reads and shell commands carry none.
         let out = process(&e, &hooks_only(), &pre("Read", json!({"file_path": target})));
         assert_eq!(activity(&out).path, None);
+        assert_eq!(activity(&out).cwd, None);
+        // A human decision on an edit carries both too.
+        let perm = json!({"hook_event_name": "PermissionRequest", "session_id": "s1", "cwd": CWD,
+            "tool_name": "Write", "tool_input": {"file_path": target, "content": "x"}});
+        let out = permission_outcome(&e, &perm, None, true, None);
+        assert_eq!((activity(&out).path.as_deref(), activity(&out).cwd.as_deref()), (Some(target.as_str()), Some(CWD)));
+        assert_eq!(open_file_cwd("", &Some(target.clone())), None);
+        assert_eq!(open_file_cwd("relative", &Some(target.clone())), None);
         assert_eq!(edited_path("Bash", &json!({"file_path": target}), CWD), None);
         assert_eq!(edited_path("NotebookEdit", &json!({"notebook_path": target}), CWD).as_deref(), Some(target.as_str()));
         assert_eq!(edited_path("Write", &json!({"file_path": ""}), CWD), None);
@@ -1397,6 +1439,8 @@ mod tests {
         assert!(out.persist_vault);
         assert_eq!(out.ui_prompt.as_deref(), p.masked_prompt.as_deref());
         assert_eq!(activity(&out).verdict, "blocked_prompt");
+        // Listed under "Blocked" in the feed, counted as blocked.
+        assert_eq!(tally(&out), Tally { blocked: 1, ..Tally::default() });
 
         // Resending the masked copy passes, with the legend for the model.
         let resend = json!({
@@ -1451,7 +1495,7 @@ mod tests {
         assert_eq!(h["updatedToolOutput"]["isImage"], false);
         assert!(h["additionalContext"].as_str().unwrap().contains("{{API_KEY_1}}"));
         assert!(out.persist_vault);
-        assert_eq!(e.stats.masked.load(Relaxed), 1);
+        assert_eq!(tally(&out), Tally { masked: 1, ..Tally::default() });
         // The ledger saw the secret, so it can stop it leaving later.
         assert_eq!(e.with_ledger("o1", |l| l.secrets.len()), 1);
 
@@ -1497,7 +1541,7 @@ mod tests {
         assert_eq!(activity(&out).verdict, "denied");
         assert!(activity(&out).summary.contains("1.2 s"));
         assert_eq!(out.receipts[0].verdict, "denied_by_user");
-        assert_eq!(e.stats.blocked.load(Relaxed), 1);
+        assert_eq!(tally(&out).blocked, 1);
         let out = permission_outcome(&e, &payload, Some(&info), true, None);
         assert_eq!(activity(&out).verdict, "approved");
     }
@@ -1512,9 +1556,16 @@ mod tests {
 
         let out = extension(&e, &json!({"message": {"op": "mask", "text": format!("k={KEY}"), "site": "chatgpt.com"}}));
         assert!(out.persist_vault);
+        // The app masked it, so the app records it: feed, notice, receipt, counter.
+        assert_eq!((activity(&out).event.as_str(), activity(&out).verdict.as_str()), ("Browser", "masked"));
+        assert_eq!(privacy(&out).keys, vec!["API_KEY_1".to_string()]);
+        assert_eq!(tally(&out), Tally { masked: 1, ..Tally::default() });
         let masked = out.stdout.unwrap();
         assert_eq!(masked["text"], "k={{API_KEY_1}}");
         assert_eq!(masked["report"]["count"], 1);
+        // Nothing to mask: nothing to report.
+        let plain = extension(&e, &json!({"op": "mask", "text": "hello there", "site": "chatgpt.com"}));
+        assert!(plain.events.is_empty() && plain.receipts.is_empty());
 
         let back = extension(&e, &json!({"op": "rehydrate", "text": "k={{API_KEY_1}}"})).stdout.unwrap();
         assert_eq!(back["text"], format!("k={KEY}"));
@@ -1528,6 +1579,12 @@ mod tests {
         assert_eq!(ev.stdout.as_ref().unwrap()["ok"], true);
         assert_eq!(privacy(&ev).keys, vec!["API_KEY_1".to_string()]);
         assert_eq!(activity(&ev).event, "Browser");
+        assert_eq!(tally(&ev).masked, 1, "one known value");
+        // Values the app has never seen still count, by the number the extension reported.
+        let ev = extension(&e, &json!({"op": "event", "kind": "masked", "site": "claude.ai", "count": 3, "keys": []}));
+        assert_eq!(tally(&ev).masked, 3);
+        let ev = extension(&e, &json!({"op": "event", "kind": "blocked", "site": "claude.ai", "count": 1, "keys": []}));
+        assert_eq!(tally(&ev), Tally { blocked: 1, ..Tally::default() });
         assert_eq!(extension(&e, &json!({"op": "nope"})).stdout.unwrap()["ok"], false);
     }
 

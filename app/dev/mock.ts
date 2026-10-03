@@ -128,7 +128,8 @@ const activity: ActivityItem[] = [
   item(4, "PermissionRequest", "Bash", "Remove-Item -Recurse -Force .\\dist", "approved", "high", 64,
     "DELETES the folder dist/ and everything in it"),
   item(5, "PreToolUse", "Write", ".env", "allow", "medium", 31,
-    "WRITES .env (filled API_KEY_1 locally)", { keys: ["API_KEY_1"], path: "C:\\Users\\dev\\shop-api\\.env" }),
+    "WRITES .env (filled API_KEY_1 locally)",
+    { keys: ["API_KEY_1"], path: "C:\\Users\\dev\\shop-api\\.env", cwd: "C:\\Users\\dev\\shop-api" }),
   item(7, "PreToolUse", "Read", "~/.ssh/id_ed25519", "deny", "critical", 90,
     "READS your SSH private key (blocked path)", { rules: ["filesystem.blockedRead"] }),
   item(9, "PreToolUse", "WebFetch", "https://docs.stripe.com/api", "allow", "low", 12, "Fetches docs.stripe.com"),
@@ -420,7 +421,11 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     return [...out, ...(by[e.kind] ?? []).map(([label, text]) => ({ label, text }))];
   },
   vault_copy: (a) => vault.some((v) => v.key === a.key),
-  open_file: () => true,
+  // Rust: `code <cwd> --goto <path>` when cwd holds the file, else `code --reuse-window --goto <path>`.
+  open_file: (a) => {
+    console.info(`[zuko:mock] open_file ${String(a.path)} in ${a.cwd ? String(a.cwd) : "the last VS Code window"}`);
+    return true;
+  },
   activity_recent: (a) => activity.slice(0, Number(a.limit) || 200),
   audit_verify: (): AuditVerifyResult => ({ ok: true, count: 1284, error: null }),
   mask_text: (a) => maskDemo(String(a.text)),

@@ -65,13 +65,16 @@ export function protectionSection(initial: ProtectionStatus | null): HTMLElement
         p.mode === "monitor" ? "Monitor — logs everything, blocks nothing" : "Enforce"),
     );
     clear(counters);
-    counters.append(tiles([
-      [fmtCount(p.maskedTotal), "masked", "#2dd4bf"],
-      [fmtCount(p.blockedTotal), "blocked", "#f4505e"],
-      [fmtCount(p.askedTotal), "asked", AMBER],
-      [fmtCount(p.autoAllowedTotal), "auto-allowed"],
-      [fmtCount(p.vaultSize), "in vault"],
-    ]));
+    counters.append(
+      tiles([
+        [fmtCount(p.maskedTotal), "masked today", "#2dd4bf"],
+        [fmtCount(p.blockedTotal), "blocked today", "#f4505e"],
+        [fmtCount(p.askedTotal), "asked today", AMBER],
+        [fmtCount(p.autoAllowedTotal), "auto-allowed today"],
+        [fmtCount(p.vaultSize), "in vault"],
+      ]),
+      hint("Today's counts start at midnight and are read back from the audit log, so a restart keeps them. They match the Activity filters for today."),
+    );
   }
 
   function draw() {

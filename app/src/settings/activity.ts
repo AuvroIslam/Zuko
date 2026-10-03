@@ -30,9 +30,12 @@ export function activitySection(initial: ActivityItem[] | null, auditPath: strin
     },
   );
 
-  /** Opens the edited file in VS Code (or shows its folder); only on Write/Edit rows. */
-  function openFile(path: string): HTMLElement {
-    return h("button", { class: "small", text: "Open file", title: path, onclick: () => void Bridge.openFile(path) });
+  /**
+   * Opens the edited file in VS Code, in the window that has the session folder open (or
+   * shows its folder); only on Write/Edit rows.
+   */
+  function openFile(path: string, cwd: string | undefined): HTMLElement {
+    return h("button", { class: "small", text: "Open file", title: path, onclick: () => void Bridge.openFile(path, cwd) });
   }
 
   function itemRow(a: ActivityItem): HTMLElement {
@@ -53,7 +56,7 @@ export function activitySection(initial: ActivityItem[] | null, auditPath: strin
           v.group !== "privacy" ? h("span", { text: `${a.tier} ${a.score}` }) : null,
           h("span", { text: where }),
           rules,
-          a.path ? openFile(a.path) : null,
+          a.path ? openFile(a.path, a.cwd) : null,
           a.keys.length ? h("span", { class: "keys", text: a.keys.map((k) => `{{${k}}}`).join(" ") }) : null),
       ),
       h("span", { class: "act-ago", text: relTime(a.ts) }),

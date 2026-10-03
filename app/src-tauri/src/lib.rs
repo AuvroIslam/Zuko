@@ -25,6 +25,7 @@ mod secrets;
 mod settings;
 mod tray;
 mod vaultstore;
+mod vscode;
 
 use std::process::Command;
 use std::sync::atomic::Ordering;
@@ -182,19 +183,22 @@ fn open_in_vscode(path: Option<String>) -> bool {
 }
 
 /// "Open file" on an activity row: opens the file Claude just wrote or edited in VS Code
-/// (`code --goto <path>`) when `code` is on PATH, otherwise shows its folder in the file
-/// manager. Same rules as `open_in_vscode`: no shell, the path is its own argument, and
-/// only an existing file given by its full path gets this far (the path comes from a hook
-/// payload; xdg-open or a shell would run a file with whatever handles its type).
+/// when `code` is on PATH, otherwise shows its folder in the file manager. `cwd` is the
+/// session's working folder: handed to VS Code first (`code <cwd> --goto <path>`), it
+/// brings the file up in the window already running the task instead of a new one (see
+/// vscode.rs). Same rules as `open_in_vscode`: no shell, every path is its own argument,
+/// and only an existing file given by its full path gets this far (the path comes from a
+/// hook payload; xdg-open or a shell would run a file with whatever handles its type).
 #[tauri::command]
-fn open_file(path: String) -> bool {
+fn open_file(path: String, cwd: Option<String>) -> bool {
     let p = std::path::Path::new(&path);
     if !(p.is_absolute() && p.is_file()) {
         return false;
     }
     if let Some(code) = platform::find_on_path("code") {
+        let folder = vscode::project_folder(p, cwd.as_deref());
         let mut cmd = Command::new(code);
-        cmd.arg("--goto").arg(p);
+        cmd.args(vscode::open_file_args(p, folder.as_deref()));
         if platform::no_console(&mut cmd).spawn().is_ok() {
             return true;
         }
@@ -569,8 +573,10 @@ pub fn run() {
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
             log::line(format!("--- Zuko {} started ---", env!("CARGO_PKG_VERSION")));
-            // Resume the audit chain and seed the activity feed before the first event.
+            // Resume the audit chain, seed the activity feed and count today's receipts
+            // before the first event.
             auditlog::init();
+            events::spawn_status_watch(&handle);
             commands::register_hotkeys(&handle);
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());

@@ -95,8 +95,12 @@ export const Bridge = {
   /** "Open terminal" → opens the folder in VS Code when `code` is on PATH. */
   openInVSCode: (path: string | null) => call<boolean>("open_in_vscode", { path }),
 
-  /** "Open file" on an activity row: VS Code (`code --goto`) or the file's folder. False when it did not open in VS Code. */
-  openFile: (path: string) => call<boolean>("open_file", { path }),
+  /**
+   * "Open file" on an activity row: VS Code, in the window that has the session folder
+   * `cwd` open (`code <cwd> --goto <path>`), or the file's folder in Explorer. False when
+   * it did not open in VS Code.
+   */
+  openFile: (path: string, cwd?: string | null) => call<boolean>("open_file", { path, cwd: cwd ?? null }),
 
   quit: () => call<void>("quit_app"),
 
@@ -307,13 +311,17 @@ export interface ProtectionStatus {
   denyRulesInstalled: boolean;
   mode: PolicyMode;
   vaultSize: number;
-  /** Values masked since launch. */
+  // The four totals are today's (local date, back to 0 at midnight), counted from the
+  // audit log, so they survive a restart and match the activity feed's filters.
+  /** Values masked today (each masking counts the distinct values it replaced). */
   maskedTotal: number;
-  /** Actions denied since launch. */
+  /** Actions denied (policy or human) and prompts held back today. */
   blockedTotal: number;
+  /** Actions Zuko asked about today. */
   askedTotal: number;
+  /** Low-risk actions allowed without asking today. */
   autoAllowedTotal: number;
-  /** A native-host connection was seen in the last 60 s. */
+  /** The browser extension was heard from in the last 60 s (it says hello every 25 s while linked). */
   extensionConnected: boolean;
   policyPath: string;
   auditPath: string;
@@ -349,6 +357,8 @@ export interface ActivityItem {
   aiExplanation?: string;
   /** Absolute path of the file a Write/Edit/MultiEdit/NotebookEdit call targets ("Open file"). Live items only. */
   path?: string;
+  /** The session's working folder, next to `path`: "Open file" opens the file in the VS Code window that has it open. */
+  cwd?: string;
 }
 
 /** One non-sensitive fact about a vault value (never the value itself). */

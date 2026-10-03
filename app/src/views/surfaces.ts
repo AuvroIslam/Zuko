@@ -78,10 +78,11 @@ function claudeCard(task: AgentTask, p: ProtectionStatus | null, actions: ViewAc
     { class: "sf-card" },
     head(task.color, task.name, "Agent firewall"),
     line,
+    // Today's counters (back to 0 at midnight).
     tiles(
-      [p?.askedTotal ?? 0, "asked", AMBER],
-      [p?.blockedTotal ?? 0, "blocked", RED],
-      [p?.autoAllowedTotal ?? 0, "auto-allowed"],
+      [p?.askedTotal ?? 0, "asked today", AMBER],
+      [p?.blockedTotal ?? 0, "blocked today", RED],
+      [p?.autoAllowedTotal ?? 0, "auto-allowed today"],
     ),
     links(
       ["Open VS Code", () => actions.openTerminal()],
@@ -104,7 +105,7 @@ function gatewayCard(task: AgentTask, p: ProtectionStatus | null, actions: ViewA
     head(task.color, task.name, "Privacy proxy"),
     line,
     tiles(
-      [p?.maskedTotal ?? 0, "masked", "#2DD4BF"],
+      [p?.maskedTotal ?? 0, "masked today", "#2DD4BF"],
       [p?.vaultSize ?? 0, "in vault"],
     ),
     links([p?.gatewayConfigured ? "Settings…" : "Turn on…", () => actions.openSettingsWindow()]),
@@ -138,9 +139,9 @@ function policyCard(task: AgentTask, p: ProtectionStatus | null, actions: ViewAc
     { class: "sf-card" },
     head(task.color, task.name, monitor ? "Monitor mode" : "Enforced"),
     tiles(
-      [p?.blockedTotal ?? 0, monitor ? "would block" : "blocked", RED],
-      [p?.askedTotal ?? 0, "asked", AMBER],
-      [p?.autoAllowedTotal ?? 0, "auto-allowed"],
+      [p?.blockedTotal ?? 0, monitor ? "would block today" : "blocked today", RED],
+      [p?.askedTotal ?? 0, "asked today", AMBER],
+      [p?.autoAllowedTotal ?? 0, "auto-allowed today"],
     ),
     last
       ? h("div", { class: "sf-rows" }, activityRow(last))
