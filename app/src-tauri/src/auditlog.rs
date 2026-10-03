@@ -87,7 +87,7 @@ impl Tally {
 
 /// Distinct values a masking receipt stands for: its vault keys. A browser report can name
 /// values the app's vault has never seen (the extension masked them on its own), so it
-/// keeps no keys; its summary, written by `firewall::browser_event` as `<kind> (<count>)`,
+/// keeps no keys; its summary, written by `firewall::browser_report` as `<kind> (<count>)`,
 /// still says how many.
 fn masked_values(r: &Receipt) -> u64 {
     if !r.keys.is_empty() {
