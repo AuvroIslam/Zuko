@@ -126,7 +126,7 @@ fn island_drag(app: AppHandle, shared: State<Shared>, phase: String, dx: f64) {
     }
     // A move without its start (should not happen) starts the drag where the island is.
     let from = *shared.gate.drag_from.lock().unwrap().get_or_insert(current);
-    let width = island::monitor_logical_width(&app, &pref);
+    let width = island::drag_monitor_width(&app, &pref);
     let dx = if dx.is_finite() { dx } else { 0.0 };
     let offset = island::clamp_offset(from + dx / width.max(1.0), width, island::PANEL_W);
     let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);

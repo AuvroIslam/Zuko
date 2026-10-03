@@ -225,11 +225,18 @@ pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool, offset: f64)
     let _ = win.set_always_on_top(true);
 }
 
+/// The display a drag happens on: the one the island is on now. (With "the display under
+/// the cursor" the target display would otherwise change the moment the pointer crossed
+/// onto the next one, and the island would jump there mid-drag.)
+fn drag_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
+    window(app).and_then(|w| w.current_monitor().ok().flatten()).or_else(|| target_monitor(app, pref))
+}
+
 /// Moves the window to `offset` without touching its size: the drag path, which runs
 /// on every frame of a drag and must not resize anything under the cursor.
 pub fn move_to(app: &AppHandle, pref: &str, collapsed: bool, offset: f64) {
     let Some(win) = window(app) else { return };
-    let Some(m) = target_monitor(app, pref) else { return };
+    let Some(m) = drag_monitor(app, pref) else { return };
     let scale = m.scale_factor();
     let lw = if collapsed { STRIP_W } else { PANEL_W };
     let pw = (lw * scale).round().max(1.0) as u32;
@@ -238,9 +245,12 @@ pub fn move_to(app: &AppHandle, pref: &str, collapsed: bool, offset: f64) {
     let _ = win.set_position(PhysicalPosition::new(x, m.position().y));
 }
 
-/// Width of the island's display in logical pixels (drag deltas arrive in those).
-pub fn monitor_logical_width(app: &AppHandle, pref: &str) -> f64 {
-    screen_info(app, pref).width
+/// Width in logical pixels (drag deltas arrive in those) of the display a drag is on.
+pub fn drag_monitor_width(app: &AppHandle, pref: &str) -> f64 {
+    match drag_monitor(app, pref) {
+        Some(m) => m.size().width as f64 / m.scale_factor(),
+        None => screen_info(app, pref).width,
+    }
 }
 
 /// The island as drawn now, in physical screen pixels `[left, top, right, bottom]`, with
