@@ -395,7 +395,11 @@ fn update_click_through(app: &AppHandle, gate: &PollGate, force: bool) -> Option
     let size = (size.width as f64 / scale, size.height as f64 / scale);
     // Nowhere (NaN) when the cursor is unknown: off the island, still on the wake strip.
     let where_ = at.unwrap_or((f64::NAN, f64::NAN));
-    if let Some(ignore) = gate.click_through_change(where_, size, left_button_down(), force) {
+    let down = left_button_down();
+    if let Some(ignore) = gate.click_through_change(where_, size, down, force) {
+        if down {
+            crate::log::line(format!("drag-diag: button down, click-through={ignore} at={where_:?} size={size:?}"));
+        }
         let _ = win.set_ignore_cursor_events(ignore);
     }
     at

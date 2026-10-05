@@ -106,12 +106,16 @@ pub fn start(app: AppHandle) {
                 }
             };
             let connected = std::mem::replace(&mut server, next);
-            let client = {
+            let (client, client_pid) = {
                 use std::os::windows::io::AsRawHandle;
-                classify(crate::platform::pipe_client_exe(connected.as_raw_handle()))
+                let handle = connected.as_raw_handle();
+                (
+                    classify(crate::platform::pipe_client_exe(handle)),
+                    crate::platform::pipe_client_pid(handle),
+                )
             };
             let app = app.clone();
-            tauri::async_runtime::spawn(async move { handle(app, connected, client).await });
+            tauri::async_runtime::spawn(async move { handle(app, connected, client, client_pid).await });
         }
     });
 }
@@ -159,9 +163,11 @@ pub fn start(app: AppHandle) {
                 log::line("refused a relay connection from another user");
                 continue;
             }
-            let client = classify(crate::platform::peer_exe(stream.peer_cred().ok().and_then(|c| c.pid())));
+            let client_pid = stream.peer_cred().ok().and_then(|c| c.pid());
+            let client = classify(crate::platform::peer_exe(client_pid));
             let app = app.clone();
-            tauri::async_runtime::spawn(async move { handle(app, stream, client).await });
+            let client_pid = client_pid.and_then(|pid| u32::try_from(pid).ok());
+            tauri::async_runtime::spawn(async move { handle(app, stream, client, client_pid).await });
         }
     });
 }
@@ -234,7 +240,9 @@ fn next_to_app(exe: &std::path::Path) -> bool {
     }
 }
 
-async fn handle(app: AppHandle, mut pipe: impl Relay, client: Client) {
+/// `client_pid` is the relay's own process: the terminal the session runs in is
+/// somewhere above it, which is what "Open terminal" brings to the front later.
+async fn handle(app: AppHandle, mut pipe: impl Relay, client: Client, client_pid: Option<u32>) {
     let Some(payload) = read_request(&mut pipe).await else {
         pipe.finish();
         return;
@@ -251,6 +259,14 @@ async fn handle(app: AppHandle, mut pipe: impl Relay, client: Client) {
         return;
     }
     let wants_reply = payload.get("zuko_wants_reply").and_then(Value::as_bool).unwrap_or(false);
+
+    // Which terminal this session runs in, noted while the relay is still alive:
+    // a lookup the island needs long after the connection is gone. Cheap after the
+    // first event of a session, and nothing waits for it.
+    if let (Client::Relay, Some(pid)) = (&client, client_pid) {
+        let session = payload.get("session_id").and_then(Value::as_str).unwrap_or_default();
+        crate::terminal::remember(&app, session, pid);
+    }
 
     match event.as_str() {
         "ZukoExtension" => {

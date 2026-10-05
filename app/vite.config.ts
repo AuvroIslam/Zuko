@@ -5,7 +5,13 @@ import { resolve } from "node:path";
 // no audio assets to serve or copy.
 export default defineConfig({
   clearScreen: false,
-  server: { port: 1420, strictPort: true, host: "127.0.0.1" },
+  server: {
+    port: 1420,
+    strictPort: true,
+    host: "127.0.0.1",
+    // Cargo writes and locks build artifacts while Tauri compiles on Windows.
+    watch: { ignored: ["**/target/**"] },
+  },
   envPrefix: ["VITE_", "TAURI_ENV_"],
   build: {
     target: "chrome110",

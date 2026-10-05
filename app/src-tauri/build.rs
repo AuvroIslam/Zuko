@@ -6,12 +6,17 @@ fn main() {
 /// The unit-test binary links the same Tauri / WebView2 code as the app, which
 /// imports `TaskDialogIndirect`. That function only exists in Common Controls v6, which
 /// Windows hands out to executables whose manifest asks for it. `tauri_build` embeds the
-/// manifest in the app binary only (cargo has no link-arg scope for a lib's unit tests, so
-/// the manifest goes to every executable; the app binary already carries two copies, the
-/// linker keeps the first), so without this the test executable dies at start-up
+/// manifest in the app binary only. Cargo cannot scope link arguments to library
+/// unit tests, so opt in with ZUKO_TEST_MANIFEST=1 for `cargo test --lib` only.
+/// Normal app builds must not link this duplicate resource. Without the
+/// extra manifest the test executable dies at start-up
 /// with STATUS_ENTRYPOINT_NOT_FOUND before running a single test.
 fn embed_test_manifest() {
     use std::path::PathBuf;
+    println!("cargo:rerun-if-env-changed=ZUKO_TEST_MANIFEST");
+    if std::env::var("ZUKO_TEST_MANIFEST").as_deref() != Ok("1") {
+        return;
+    }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }

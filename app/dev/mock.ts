@@ -471,6 +471,11 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     emit("settings-changed", { ...mockSettings });
     return nativeHost(mockSettings.browserBridge);
   },
+  // Rust raises the window of the terminal that session runs in; here it only says so.
+  focus_terminal: (a) => {
+    console.info(`[zuko:mock] focus_terminal session=${String(a.sessionId)} cwd=${String(a.cwd)}`);
+    return true;
+  },
   // Rust: `code <cwd> --goto <path>` when cwd holds the file, else `code --reuse-window --goto <path>`.
   open_file: (a) => {
     console.info(`[zuko:mock] open_file ${String(a.path)} in ${a.cwd ? String(a.cwd) : "the last VS Code window"}`);

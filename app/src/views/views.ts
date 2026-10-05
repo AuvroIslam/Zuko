@@ -20,7 +20,10 @@ export interface ViewActions {
   setView(v: IslandViewName): void;
   collapse(): void;
   setFocus(id: string): void;
+  /** Raises the terminal the focused session runs in (the folder, if it is gone). */
   openTerminal(): void;
+  /** Opens the focused session's folder in the editor. */
+  openProject(): void;
   /** The ↗ button: opens whatever the focused pill points at. */
   openTarget(): void;
   openUrl(url: string): void;

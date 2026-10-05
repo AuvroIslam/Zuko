@@ -141,9 +141,18 @@ export class Island {
         // The Claude pill is the way back to a card that is still waiting.
         if (id === CLAUDE_ID && State.pendingApproval) this.setView("approval");
       },
+      // "Open terminal" means *the* terminal: the window this session is already
+      // running in, where Claude Code is waiting. Only when there is none left to
+      // raise does it fall back to opening the project folder.
       openTerminal: () => {
-        const cwd = State.focusTask?.sessionCwd ?? null;
-        void Bridge.openInVSCode(cwd);
+        const task = State.focusTask;
+        const cwd = task?.sessionCwd ?? null;
+        void Bridge.focusTerminal(task?.sessionId ?? null, cwd).then((focused) => {
+          if (!focused) void Bridge.openInVSCode(cwd);
+        });
+      },
+      openProject: () => {
+        void Bridge.openInVSCode(State.focusTask?.sessionCwd ?? null);
       },
       // The ↗ button: the session folder for Claude Code and agents, the
       // settings window for Zuko's own surfaces.
@@ -762,6 +771,15 @@ export class Island {
       State.lastActivity = performance.now();
     });
 
+    // Diagnostic: the page itself seeing a drag means WebView2's own drop target
+    // is answering instead of Tauri's.
+    let domDragLogged = false;
+    window.addEventListener("dragenter", () => {
+      if (!domDragLogged) void Bridge.log("drag-diag: DOM dragenter reached the page");
+      domDragLogged = true;
+    });
+    window.addEventListener("dragleave", () => { domDragLogged = false; });
+    window.addEventListener("drop", () => { domDragLogged = false; });
     void onDragDrop((e) => this.onDragDrop(e));
 
     // Outside Tauri (plain browser) drive the cursor from DOM events so the

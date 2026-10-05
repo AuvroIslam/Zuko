@@ -24,6 +24,7 @@ mod policystore;
 mod sanitize;
 mod secrets;
 mod settings;
+mod terminal;
 mod tray;
 mod vaultstore;
 mod vscode;
@@ -44,6 +45,7 @@ use hooks::{HookPreview, HookStatus};
 use island::{PollGate, ScreenInfo};
 use pipe::Pending;
 use settings::Settings;
+use terminal::Terminals;
 
 pub struct Shared {
     pub settings: Mutex<Settings>,
@@ -174,6 +176,10 @@ fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
     shared.gate.collapsed.store(collapsed, Ordering::Relaxed);
     island::apply_geometry(&app, &pref, collapsed, offset);
     shared.gate.set_active(!collapsed);
+    // The cursor poll re-clears WebView2's own drop target whenever a press might start a
+    // drag, and it is parked while the island is hidden. Whatever the window is now (the
+    // wake strip or the panel), a file dragged onto it must still find Tauri's target.
+    allow_file_drops(&app);
 }
 
 /// The front end pushes the island shape; Rust decides click-through from it.
@@ -269,6 +275,24 @@ fn open_file(path: String, cwd: Option<String>) -> bool {
         platform::reveal_folder(&dir.to_string_lossy());
     }
     false
+}
+
+/// "Open terminal" on the island: brings the terminal window this session is
+/// already running in to the front — the one Claude Code is asking its question in.
+/// The app noted it from the relay's own process when the session's first hook
+/// event arrived (terminal.rs).
+///
+/// False when there is no such window to raise (the terminal has been closed, the
+/// session predates this Zuko, or the platform cannot raise other windows at all);
+/// the island then falls back to `open_in_vscode`, which is what the button did
+/// before. `cwd` only helps tell two windows of the same terminal apart.
+#[tauri::command]
+fn focus_terminal(app: AppHandle, session_id: Option<String>, cwd: Option<String>) -> bool {
+    let focused = terminal::focus(&app, session_id.as_deref(), cwd.as_deref());
+    if !focused {
+        log::line("open terminal: no window for this session — opening the folder instead");
+    }
+    focused
 }
 
 #[tauri::command]
@@ -603,6 +627,7 @@ pub fn run() {
             gate: gate.clone(),
         })
         .manage(Pending::default())
+        .manage(Terminals::default())
         .manage(Chat::default())
         .manage(Engine::load())
         .invoke_handler(tauri::generate_handler![
@@ -617,6 +642,7 @@ pub fn run() {
             open_url,
             open_in_vscode,
             open_file,
+            focus_terminal,
             quit_app,
             hooks_status,
             hooks_preview,

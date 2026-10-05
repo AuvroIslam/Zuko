@@ -10,6 +10,7 @@
 //   * the cursor comes from the page's own mouse events, which only fire over
 //     the island — Zuko's eyes follow the pointer there, not across the screen.
 
+use std::collections::HashSet;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -20,7 +21,7 @@ use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
 use tauri::{AppHandle, WebviewWindow};
 
-use super::{home_dir, LocalTime};
+use super::{home_dir, LocalTime, ProcRow};
 
 /// File name of the Claude Code relay.
 pub const HOOK_EXE: &str = "zuko-hook";
@@ -147,6 +148,45 @@ pub fn find_on_path(stem: &str) -> Option<PathBuf> {
                 .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
                 .unwrap_or(false)
         })
+}
+
+// ── Finding the terminal a session runs in ───────────────────────────────────
+//
+// Windows only, for now. Wayland deliberately gives an app no way to raise
+// another application's window (and no way to learn which windows exist), so
+// "Open terminal" on Linux keeps doing what it always did: it opens the project
+// folder. The process tree is readable from /proc, but with no window to focus at
+// the end of the walk there is nothing to read it for — hence an empty table
+// rather than half a feature.
+
+pub fn process_table() -> Vec<ProcRow> {
+    Vec::new()
+}
+
+pub fn pids_with_windows() -> HashSet<u32> {
+    HashSet::new()
+}
+
+pub fn windows_of_pid(_pid: u32) -> Vec<(isize, String)> {
+    Vec::new()
+}
+
+pub fn focus_window_handle(_handle: isize) -> bool {
+    false
+}
+
+/// Process start time in clock ticks since boot (field 22 of /proc/<pid>/stat),
+/// comparable between processes like the Windows creation time.
+pub fn process_created(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The second field is the executable name in parentheses and may contain
+    // spaces, so the fields are counted from the closing one.
+    let rest = stat.rsplit_once(')')?.1;
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
+pub fn process_alive(pid: u32) -> bool {
+    pid != 0 && Path::new(&format!("/proc/{pid}")).exists()
 }
 
 // ── Browser native messaging ──────────────────────────────────────────────────

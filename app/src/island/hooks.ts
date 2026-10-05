@@ -117,11 +117,13 @@ function approvalTarget(tool: string, input: Record<string, unknown>): string {
   return tool;
 }
 
-function upsert(projectName: string, cwd: string) {
+function upsert(projectName: string, cwd: string, sessionId?: string) {
   const t = State.task(CLAUDE_ID);
   if (!t) return;
   t.name = projectName;
   if (cwd) t.sessionCwd = cwd;
+  // "Open terminal" asks Rust for the terminal this session runs in, by this id.
+  if (sessionId) t.sessionId = sessionId;
 }
 
 function clearSession() {
@@ -216,6 +218,7 @@ function handleHook(island: Island, payload: HookEventPayload) {
 
   const name = payload.hook_event_name ?? "";
   const cwd = payload.cwd ?? "";
+  const sessionId = payload.session_id ?? "";
   const projectName = lastPathComponent(cwd) || "Session";
 
   // Route to the right pill. Valid zuko_agent → dynamic "agent_<name>" pill.
@@ -241,8 +244,13 @@ function handleHook(island: Island, payload: HookEventPayload) {
   const ensurePill = () => {
     if (isExternalAgent) {
       State.upsertExternalAgent(agentId, validAgent!, agentColor(validAgent!));
+      const agent = State.task(agentId);
+      if (agent) {
+        if (cwd) agent.sessionCwd = cwd;
+        if (sessionId) agent.sessionId = sessionId;
+      }
     } else {
-      upsert(projectName, cwd);
+      upsert(projectName, cwd, sessionId);
     }
   };
 
@@ -366,7 +374,7 @@ function handleHook(island: Island, payload: HookEventPayload) {
         if (requestId) void Bridge.approvalDecline(requestId);
         break;
       }
-      upsert(projectName, cwd);
+      upsert(projectName, cwd, sessionId);
       if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
       const tool = payload.tool_name ?? "Tool";
       const input = payload.tool_input ?? {};

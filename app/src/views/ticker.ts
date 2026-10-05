@@ -36,9 +36,13 @@ function makeRow(): Row {
   check.style.position = "absolute";
   chevron.style.position = "absolute";
   const shimmer = h("span", { class: "tick-text shimmer" });
+  // `top:0` is load-bearing. Without it the static position applies, and because
+  // both copies are nowrap and cannot share a line, the dim one lands a line
+  // lower — inside the next row's 22 px, which is what made the ticker read as
+  // two steps printed over each other.
   const dim = h("span", {
     class: "tick-text",
-    style: "position:absolute;left:0;right:0;color:#6b7079",
+    style: "position:absolute;top:0;left:0;color:#6b7079",
   });
   const el = h(
     "div",

@@ -505,6 +505,16 @@ body.island-dragging * {
 
 .ticker-row .tick-text {
   font: 500 13px var(--font);
+  /* After the shorthand, which resets line-height. One row exactly, so the two
+     stacked copies of a step share a baseline and neighbouring rows cannot
+     touch. */
+  line-height: 22px;
+  /* Inline boxes ignore overflow/text-overflow, so a long command used to run
+     out of the card instead of ending in an ellipsis. fit-content keeps the
+     shimmer gradient hugging the text rather than the whole row. */
+  display: block;
+  width: fit-content;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

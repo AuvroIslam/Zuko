@@ -15,6 +15,15 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use self::linux::*;
 
+/// One running process, as `process_table` reports it. Used to walk up from the
+/// relay to the terminal it was started in (see `terminal.rs`).
+pub struct ProcRow {
+    pub pid: u32,
+    pub ppid: u32,
+    /// Executable file name, lowercase.
+    pub name: String,
+}
+
 /// Wall-clock time in the user's time zone, for log lines and backup names.
 pub struct LocalTime {
     pub year: u32,

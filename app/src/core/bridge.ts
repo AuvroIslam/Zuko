@@ -100,8 +100,17 @@ export const Bridge = {
 
   openUrl: (url: string) => call<void>("open_url", { url }),
 
-  /** "Open terminal" → opens the folder in VS Code when `code` is on PATH. */
+  /** The ↗ button and "Open VS Code": opens the folder in VS Code when `code` is on PATH. */
   openInVSCode: (path: string | null) => call<boolean>("open_in_vscode", { path }),
+
+  /**
+   * "Open terminal": raises the terminal window this session already runs in — the one
+   * Claude Code is asking its question in. False when there is none to raise (it was
+   * closed, or the session started before this Zuko did); then open the folder instead.
+   * `cwd` only helps tell two windows of the same terminal apart.
+   */
+  focusTerminal: (sessionId?: string | null, cwd?: string | null) =>
+    call<boolean>("focus_terminal", { sessionId: sessionId ?? null, cwd: cwd ?? null }),
 
   /**
    * "Open file" on an activity row: VS Code, in the window that has the session folder

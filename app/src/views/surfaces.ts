@@ -85,7 +85,7 @@ function claudeCard(task: AgentTask, p: ProtectionStatus | null, actions: ViewAc
       [p?.autoAllowedTotal ?? 0, "auto-allowed"],
     ),
     links(
-      ["Open VS Code", () => actions.openTerminal()],
+      ["Open VS Code", () => actions.openProject()],
       [installed ? "Settings…" : "Install…", () => actions.openSettingsWindow()],
     ),
   );

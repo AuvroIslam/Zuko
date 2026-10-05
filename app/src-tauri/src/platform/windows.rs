@@ -1,5 +1,6 @@
 // Windows: Win32 for the island window and the cursor, %APPDATA% for files.
 
+use std::collections::HashSet;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
@@ -8,7 +9,11 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 
 use ::windows::core::{BOOL, PCWSTR, PWSTR};
 use ::windows::Win32::Foundation::{
-    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, HLOCAL, HWND, LPARAM, LocalFree, POINT, WIN32_ERROR,
+    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, FILETIME, HANDLE, HLOCAL, HWND, LPARAM, LocalFree, POINT,
+    WIN32_ERROR,
+};
+use ::windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use ::windows::Win32::System::Registry::{
     RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegGetValueW, RegOpenKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
@@ -20,16 +25,18 @@ use ::windows::Win32::System::Ole::RevokeDragDrop;
 use ::windows::Win32::System::SystemInformation::GetLocalTime;
 use ::windows::Win32::System::Pipes::GetNamedPipeClientProcessId;
 use ::windows::Win32::System::Threading::{
-    GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
-    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    AttachThreadInput, GetCurrentProcess, GetExitCodeProcess, GetProcessTimes, OpenProcess, OpenProcessToken,
+    QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, GetClassNameW, GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW,
-    GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    BringWindowToTop, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow,
+    GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
+    IsWindowVisible, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, SwitchToThisWindow, GWL_EXSTYLE, GW_OWNER,
+    SW_RESTORE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
-use super::LocalTime;
+use super::{LocalTime, ProcRow};
 use crate::island::WINDOW_LABEL;
 
 /// File name of the Claude Code relay.
@@ -372,9 +379,7 @@ pub fn native_messaging_remove(browser_home: &str, host: &str) -> std::io::Resul
 /// None if Windows will not say. Used to accept hook events only from Zuko's own
 /// relay and extension messages only from Zuko's own native host.
 pub fn pipe_client_exe(pipe: std::os::windows::io::RawHandle) -> Option<PathBuf> {
-    let mut pid = 0u32;
-    // SAFETY: `pipe` is a live, connected pipe instance owned by the caller.
-    unsafe { GetNamedPipeClientProcessId(HANDLE(pipe as _), &mut pid) }.ok()?;
+    let pid = pipe_client_pid(pipe)?;
     // SAFETY: plain query on a process we only read the image name of.
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
     let mut buf = vec![0u16; 32_768];
@@ -385,4 +390,191 @@ pub fn pipe_client_exe(pipe: std::os::windows::io::RawHandle) -> Option<PathBuf>
     }
     ok.ok()?;
     Some(PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])))
+}
+
+/// Process id on the other end of a connected pipe instance. The relay's pid: the
+/// terminal it was started in is somewhere above it (see `terminal.rs`).
+pub fn pipe_client_pid(pipe: std::os::windows::io::RawHandle) -> Option<u32> {
+    let mut pid = 0u32;
+    // SAFETY: `pipe` is a live, connected pipe instance owned by the caller.
+    unsafe { GetNamedPipeClientProcessId(HANDLE(pipe as _), &mut pid) }.ok()?;
+    (pid != 0).then_some(pid)
+}
+
+// ── Finding the terminal a session runs in ───────────────────────────────────
+//
+// Three cheap reads, all of them snapshots of a moment: the process tree, which
+// processes own a window, and when a process started. terminal.rs puts them
+// together; nothing here holds a handle or changes anything.
+
+/// Every process with its parent, from one Toolhelp snapshot.
+pub fn process_table() -> Vec<ProcRow> {
+    let mut rows = Vec::new();
+    // SAFETY: the snapshot handle is closed before returning, and every call only
+    // reads from it. A failed snapshot (a transient ERROR_BAD_LENGTH) is no table.
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return rows };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let name = &entry.szExeFile;
+                let len = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+                rows.push(ProcRow {
+                    pid: entry.th32ProcessID,
+                    ppid: entry.th32ParentProcessID,
+                    name: String::from_utf16_lossy(&name[..len]).to_lowercase(),
+                });
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snapshot);
+    }
+    rows
+}
+
+/// Processes that own at least one window a person can click on.
+pub fn pids_with_windows() -> HashSet<u32> {
+    let mut pids: HashSet<u32> = HashSet::new();
+    // SAFETY: EnumWindows calls `collect_pid` on this thread with our own pointer,
+    // and does not keep it after the call returns.
+    unsafe {
+        let _ = EnumWindows(Some(collect_pid), LPARAM(&mut pids as *mut HashSet<u32> as isize));
+    }
+    pids
+}
+
+unsafe extern "system" fn collect_pid(hwnd: HWND, param: LPARAM) -> BOOL {
+    if unsafe { is_user_window(hwnd) } {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        if pid != 0 {
+            unsafe { &mut *(param.0 as *mut HashSet<u32>) }.insert(pid);
+        }
+    }
+    true.into()
+}
+
+/// Windows of one process, each with its title — what tells two VS Code windows
+/// (or two terminal windows) apart.
+pub fn windows_of_pid(pid: u32) -> Vec<(isize, String)> {
+    let mut found = Titled { pid, windows: Vec::new() };
+    // SAFETY: as above — the pointer is only used for the duration of the call.
+    unsafe {
+        let _ = EnumWindows(Some(collect_titled), LPARAM(&mut found as *mut Titled as isize));
+    }
+    found.windows
+}
+
+struct Titled {
+    pid: u32,
+    windows: Vec<(isize, String)>,
+}
+
+unsafe extern "system" fn collect_titled(hwnd: HWND, param: LPARAM) -> BOOL {
+    let found = unsafe { &mut *(param.0 as *mut Titled) };
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    if pid == found.pid && unsafe { is_user_window(hwnd) } {
+        let mut text = [0u16; 512];
+        let len = unsafe { GetWindowTextW(hwnd, &mut text) };
+        let title = String::from_utf16_lossy(&text[..len.max(0) as usize]);
+        found.windows.push((hwnd.0 as isize, title));
+    }
+    true.into()
+}
+
+/// A window somebody could switch to: visible, top-level (owned windows are
+/// dialogs and tooltips) and carrying a title.
+unsafe fn is_user_window(hwnd: HWND) -> bool {
+    unsafe {
+        IsWindowVisible(hwnd).as_bool()
+            && GetWindow(hwnd, GW_OWNER).is_err()
+            && GetWindowTextLengthW(hwnd) > 0
+    }
+}
+
+/// When a process started, in 100 ns ticks. Comparable between processes, which is
+/// how a parent pid that has since been reused is spotted.
+pub fn process_created(pid: u32) -> Option<u64> {
+    if pid == 0 {
+        return None;
+    }
+    // SAFETY: a query-only handle, closed before returning; the times are plain out
+    // parameters we own.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut created = FILETIME::default();
+        let (mut exit, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default());
+        let ok = GetProcessTimes(process, &mut created, &mut exit, &mut kernel, &mut user);
+        let _ = CloseHandle(process);
+        ok.ok()?;
+        Some(((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64)
+    }
+}
+
+/// True while `pid` is a process that is still running (not merely one whose pid
+/// we can still open).
+pub fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: a query-only handle, closed before returning.
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(process, &mut code).is_ok();
+        let _ = CloseHandle(process);
+        ok && code == STILL_RUNNING
+    }
+}
+
+/// `GetExitCodeProcess` reports this while the process has not exited.
+const STILL_RUNNING: u32 = 259;
+
+/// Brings a window to the front, un-minimising it first.
+///
+/// Windows only lets the foreground process hand the foreground to someone else,
+/// and the island is WS_EX_NOACTIVATE — Zuko is never it. So `SetForegroundWindow`
+/// is likely to be refused (it flashes the taskbar button instead) and there are
+/// two more tries behind it: `SwitchToThisWindow`, the switch Alt-Tab itself uses,
+/// and then borrowing the foreground window's input queue, which makes the call
+/// come from a thread that is allowed to make it. Each one is checked rather than
+/// assumed, and `false` means the window stayed where it was.
+pub fn focus_window_handle(handle: isize) -> bool {
+    let hwnd = HWND(handle as *mut _);
+    // SAFETY: every call takes a window handle and nothing else; a handle that has
+    // gone stale makes them fail, which is the `false` below.
+    unsafe {
+        if !IsWindow(Some(hwnd)).as_bool() {
+            return false;
+        }
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        if SetForegroundWindow(hwnd).as_bool() || GetForegroundWindow() == hwnd {
+            return true;
+        }
+        let _ = BringWindowToTop(hwnd);
+        SwitchToThisWindow(hwnd, true);
+        if GetForegroundWindow() == hwnd {
+            return true;
+        }
+        // Last resort: the thread that owns the foreground window may do this, so
+        // attach to it for the one call and let go again straight away.
+        let ours = GetWindowThreadProcessId(GetForegroundWindow(), None);
+        let theirs = GetWindowThreadProcessId(hwnd, None);
+        if ours != 0 && theirs != 0 && ours != theirs {
+            let attached = AttachThreadInput(ours, theirs, true).as_bool();
+            let _ = SetForegroundWindow(hwnd);
+            if attached {
+                let _ = AttachThreadInput(ours, theirs, false);
+            }
+        }
+        GetForegroundWindow() == hwnd
+    }
 }

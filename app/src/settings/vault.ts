@@ -6,7 +6,7 @@
 // after 30 seconds.
 
 import { h, clear } from "../views/dom";
-import { Bridge, VAULT_KINDS, type EntryView } from "../core/bridge";
+import { Bridge, onEvent, VAULT_KINDS, type EntryView } from "../core/bridge";
 import { placeholder, privacySourceLabel } from "../views/format";
 import { confirmButton, feedback, hint, relTime, section, select } from "./ui";
 
@@ -29,15 +29,37 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
   const fb = feedback();
   /** Keys revealed right now → their hide timers. */
   const revealed = new Map<string, number>();
+  /** Keys whose Inspect panel is open right now. */
+  const inspected = new Set<string>();
+  /** A background refresh that arrived while a row was open, waiting for it to close. */
+  let deferred = false;
 
   async function reload() {
     entries = (await Bridge.vaultList()) ?? [];
     render();
   }
 
+  /** A refresh after a background change. `render` rebuilds every row, which would hide a
+   * revealed value and close an open Inspect panel under the pointer, so while either is
+   * open the refresh waits for it to close. */
+  async function refresh() {
+    if (revealed.size || inspected.size) {
+      deferred = true;
+      return;
+    }
+    deferred = false;
+    await reload();
+  }
+
+  /** Runs a refresh that waited, once the last reveal or Inspect panel has closed. */
+  function runDeferred() {
+    if (deferred && !revealed.size && !inspected.size) void refresh();
+  }
+
   function render() {
     for (const t of revealed.values()) window.clearTimeout(t);
     revealed.clear();
+    inspected.clear();
     count.textContent = entries.length ? String(entries.length) : "";
     clear(tbody);
     table.style.display = entries.length ? "" : "none";
@@ -62,6 +84,8 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
       if (!panel.hidden) {
         panel.hidden = true;
         inspect.textContent = "Inspect";
+        inspected.delete(e.key);
+        runDeferred();
         return;
       }
       try {
@@ -74,6 +98,7 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
         for (const r of rows) facts.append(h("dt", { text: r.label }), h("dd", { text: r.text }));
         panel.hidden = false;
         inspect.textContent = "Close";
+        inspected.add(e.key);
       } catch (err) {
         fb.error(err, "Couldn't inspect");
       }
@@ -98,6 +123,7 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
       preview.textContent = e.preview;
       preview.classList.remove("revealed");
       reveal.textContent = "Reveal";
+      runDeferred();
     };
 
     reveal.addEventListener("click", async () => {
@@ -190,5 +216,11 @@ export function vaultSection(initial: EntryView[] | null): HTMLElement {
     fb.el,
   );
   render();
+
+  // Masking or restoring anything changes this table: new entries, and the hits and "Used"
+  // time of entries already in it. `privacy` goes out exactly then, from every source
+  // (hook, gateway, chat, files, clipboard, browser).
+  void onEvent("privacy", () => void refresh());
+
   return el;
 }

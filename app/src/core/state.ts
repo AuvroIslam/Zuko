@@ -30,6 +30,8 @@ export interface AgentTask {
   /** Tooltip for the pill. */
   pillTitle?: string | null;
   sessionCwd?: string | null;
+  /** Claude Code's session id — how Rust finds the terminal this task runs in. */
+  sessionId?: string | null;
 }
 
 export interface ApprovalInfo {

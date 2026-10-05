@@ -11,6 +11,14 @@ npm run tauri dev      # live-reloading development build
 npm run pack           # installer in release/
 ```
 
+Windows library tests need an extra Common Controls manifest. Enable it only
+for the library test command, then clear it before running or building the app:
+
+```powershell
+$env:ZUKO_TEST_MANIFEST = "1"
+try { cargo test -p zuko --lib } finally { Remove-Item Env:ZUKO_TEST_MANIFEST }
+```
+
 `npm run dev` serves the front end in an ordinary browser. Add `?mock=1` to see the
 island and the settings window with fake data, without Tauri:
 
