@@ -839,6 +839,112 @@ input[type="range"]::-webkit-slider-thumb {
   background: var(--green);
 }
 
+/* The header is the switcher's button: it looks like the line it always was. */
+button.chat-head {
+  align-self: flex-start;
+  max-width: 100%;
+  margin: -3px 0 -3px -6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease-out;
+}
+
+button.chat-head:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.chat-head-caret {
+  display: inline-flex;
+  color: var(--dim-3);
+  transition: transform 0.15s ease-out;
+}
+
+.chat-head:hover .chat-head-caret {
+  color: var(--dim);
+}
+
+/* Provider and model switcher, under the header. */
+.chat-switch[hidden] {
+  display: none;
+}
+
+.chat-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chat-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-switch-name {
+  flex: 0 0 52px;
+  font: 600 10.5px var(--font);
+  color: var(--dim);
+}
+
+.chat-switch-where {
+  flex: 0 0 62px;
+  font: 400 10px var(--font);
+  color: var(--dim-4);
+}
+
+.chat-switch-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.chat-switch-opt {
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  font: 400 10.5px var(--mono);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.15s ease-out, border-color 0.15s ease-out;
+}
+
+.chat-switch-opt:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.chat-switch-opt.on {
+  border-color: var(--indigo);
+  background: rgba(99, 102, 241, 0.25);
+  color: #fff;
+}
+
+.chat-switch-note {
+  font: 400 10.5px var(--font);
+  color: var(--dim-3);
+}
+
+.chat-switch-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 10.5px var(--font);
+  color: var(--indigo);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .chip-row:empty {
   display: none;
 }
@@ -896,6 +1002,72 @@ input[type="range"]::-webkit-slider-thumb {
   padding: 6px 10px;
   font: 400 12.5px var(--font);
   color: var(--ink-2);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+/* A sent message and, under it, what the model actually received. */
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-sent {
+  align-self: flex-end;
+  max-width: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 9px;
+  border-radius: 10px;
+  border: 1px dashed rgba(45, 212, 191, 0.35);
+  background: rgba(45, 212, 191, 0.06);
+}
+
+.chat-sent-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font: 500 10px var(--font);
+  color: var(--dim-3);
+}
+
+.chat-sent-count.hit {
+  color: #5eead4;
+}
+
+.chat-sent-text {
+  font: 400 11.5px var(--font);
+  color: var(--dim);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.chat-sent .ph {
+  padding: 0 3px;
+  border-radius: 4px;
+  background: rgba(45, 212, 191, 0.16);
+  font-family: var(--mono);
+  font-size: 0.92em;
+  color: #5eead4;
+}
+
+.chat-sent-file summary {
+  cursor: pointer;
+  font: 500 10.5px var(--font);
+  color: var(--dim);
+}
+
+.chat-sent-file pre {
+  margin: 4px 0 0;
+  max-height: 110px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  font: 400 10.5px/1.45 var(--mono);
+  color: var(--dim);
   white-space: pre-wrap;
   user-select: text;
 }
@@ -1726,6 +1898,23 @@ input[type="range"]::-webkit-slider-thumb {
 
 .pv-masked {
   font-size: 11.5px;
+}
+
+/* "See what was sent": the masked message, scrollable, placeholders picked out. */
+.pv-masked.sent {
+  max-height: 96px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  user-select: text;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.pv-masked .ph {
+  padding: 0 3px;
+  border-radius: 4px;
+  background: rgba(45, 212, 191, 0.16);
+  color: #5eead4;
 }
 
 .note-text {

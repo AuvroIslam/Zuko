@@ -51,6 +51,17 @@ export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
+  /** User messages, once answered: what the model actually received (masked). */
+  sent?: SentRecord;
+}
+
+/** What one message looked like when it left: shown under it in the chat. */
+export interface SentRecord {
+  provider: ChatProvider;
+  text: string;
+  file: { name: string; kind: string; preview: string; chars: number } | null;
+  /** Labels of the values masked in this turn (never the values). */
+  masked: string[];
 }
 
 export type PromptContext =
@@ -237,6 +248,8 @@ class AppState {
   noteMessage: string | null = null;
   searchResult: SearchResult | null = null;
   chatHistory: ChatMessage[] = [];
+  /** The privacy notice's "See what was sent" is open. */
+  privacyOpen = false;
   pendingApproval: ApprovalInfo | null = null;
 
   /** Last status from Rust; null until the first answer (or outside Tauri). */

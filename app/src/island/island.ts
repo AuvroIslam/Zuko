@@ -43,6 +43,15 @@ const NO_DRAG = [
 /** The three views the drop sequence owns; leaving them stops the engine. */
 const UPLOAD_VIEWS: ReadonlySet<IslandViewName> = new Set(["upload", "uploading", "choose"]);
 
+/** Views the user is in the middle of: the island stays open on them (`fsm.held`). */
+const HELD_VIEWS: ReadonlySet<IslandViewName> = new Set(["prompt", ...UPLOAD_VIEWS]);
+
+/**
+ * Seconds after the bar completes when the chat opens on the dropped file: as Zuko grows
+ * back, just before the canvas would fade in its "what do you want to do" card.
+ */
+const CHAT_OPENS_AFTER_BAR = 0.4;
+
 /** Seconds between the drop and the moment the progress bar starts filling. */
 const PRE_PROGRESS = USC.T_PROG_START - USC.T_DROP;
 
@@ -111,6 +120,11 @@ export class Island {
 
   /** A privacy notice arrived while an approval card was up. */
   private privacyDeferred = false;
+  /**
+   * What the user was in the middle of (the chat, the drop flow) when an alert took
+   * the island over: answering the alert goes back there instead of to the default view.
+   */
+  private resumeView: IslandViewName | null = null;
 
   /** The island is being dragged along the top edge. */
   private dragging = false;
@@ -169,9 +183,10 @@ export class Island {
       keepAlive: () => this.ensureRunning(),
       dismissPrivacy: () => {
         State.privacyNotice = null;
+        State.privacyOpen = false;
         State.isPinned = false;
         this.dropPin();
-        this.setView(State.defaultView());
+        this.setView(this.takeResumeView());
       },
       toggleSound: () => {
         State.settings.soundEnabled = !State.settings.soundEnabled;
@@ -212,12 +227,7 @@ export class Island {
     // The drop sequence draws the card, the bar and its own Zuko. It sits under
     // the header, which stays visible on top of it exactly as on macOS.
     this.uploadCanvas = new UploadCanvas({
-      ask: () => {
-        State.promptContext = State.droppedFile
-          ? { kind: "file", name: State.droppedFile.name, path: State.droppedFile.path }
-          : null;
-        this.setView("prompt");
-      },
+      ask: () => this.askAboutFile(),
       cancel: () => this.setView(State.defaultView()),
     });
 
@@ -353,6 +363,9 @@ export class Island {
 
   /** Alert from the hook server: open on this view. Pinned alerts never auto-close. */
   alert(view: IslandViewName) {
+    if (State.mode === "expanded" && HELD_VIEWS.has(State.view) && !HELD_VIEWS.has(view)) {
+      this.resumeView = State.view;
+    }
     this.fsm.pinned = State.isPinned;
     this.fsm.forceHome();
     this.expand(view);
@@ -370,7 +383,7 @@ export class Island {
    */
   dropPin() {
     this.fsm.pinned = false;
-    if (!this.wasInIsland && this.fsm.state === "home" && !State.isPinned) {
+    if (!this.wasInIsland && this.fsm.state === "home" && !State.isPinned && !this.fsm.held) {
       this.fsm.mouseLeft();
       this.homeCollapseAt = performance.now() + State.settings.autoCloseInterval * 1000;
     }
@@ -413,9 +426,39 @@ export class Island {
     if (this.privacyDeferred && State.privacyNotice) {
       this.privacyDeferred = false;
       this.showPrivacy();
-      return;
+      if (State.view === "privacy") return;
     }
-    this.setView(State.defaultView());
+    this.setView(this.takeResumeView());
+  }
+
+  /** An alert closed without an answer here (it timed out): back to what it interrupted. */
+  leaveAlert() {
+    this.setView(this.takeResumeView());
+  }
+
+  /** Where answering an alert goes: back to what it interrupted, or the default view. */
+  private takeResumeView(): IslandViewName {
+    const v = this.resumeView;
+    this.resumeView = null;
+    if (v === "prompt" || v === "upload") return v;
+    // Interrupted mid-drop: the file is in, so carry on to the chat about it.
+    if (v && UPLOAD_VIEWS.has(v) && State.droppedFile) {
+      this.setPromptToFile();
+      return "prompt";
+    }
+    return State.defaultView();
+  }
+
+  /** The chat, about the file just dropped. */
+  private askAboutFile() {
+    this.setPromptToFile();
+    this.setView("prompt");
+  }
+
+  private setPromptToFile() {
+    State.promptContext = State.droppedFile
+      ? { kind: "file", name: State.droppedFile.name, path: State.droppedFile.path }
+      : null;
   }
 
   /** Shows the privacy notice, or queues it behind the approval card. */
@@ -425,6 +468,11 @@ export class Island {
       return;
     }
     const blocked = State.privacyNotice?.direction === "blocked_prompt";
+    // A masking notice never takes over the chat or the drop flow (Claude Code resends
+    // its whole conversation, so they keep coming while it works). It is in Activity,
+    // and Zuko flicks a flame. A blocked prompt needs the user, so it always shows.
+    if (!blocked && State.mode === "expanded" && HELD_VIEWS.has(State.view)) return;
+    State.privacyOpen = false;
     // A blocked prompt waits for its Copy click; a masking notice closes itself.
     State.isPinned = blocked;
     this.alert("privacy");
@@ -541,10 +589,12 @@ export class Island {
         if (State.fileDragOver) return;
         State.fileDragOver = true;
         this.engine.animateMorph(1);
-        // enterZone must run before the island expands, so the sequence is
-        // already active by the time the view becomes `upload`.
-        UploadSeq.enterZone(State.mouseInIsland.x, State.mouseInIsland.y);
+        // Open first, then start the sequence. Opening a folded island goes through the
+        // default view, and leaving the drop views ends any sequence: started before,
+        // it was ended at once and the island sat on "Uploading 0 %" for good. Both
+        // happen in this one task, so no frame is drawn in between.
         this.alert("upload");
+        UploadSeq.enterZone(State.mouseInIsland.x, State.mouseInIsland.y);
         break;
       }
       case "leave": {
@@ -564,6 +614,10 @@ export class Island {
           this.setView(State.defaultView());
           return;
         }
+        // A drop with no enter before it (or after the island folded) still gets the
+        // whole sequence, in the same order as above.
+        if (State.mode !== "expanded" || !UPLOAD_VIEWS.has(State.view)) this.alert("upload");
+        if (!UploadSeq.isActive) UploadSeq.enterZone(State.mouseInIsland.x, State.mouseInIsland.y);
         this.swallow(path);
         break;
       }
@@ -613,7 +667,7 @@ export class Island {
 
   /**
    * Sounds and view changes hung off the canvas timeline: a `tick` every 10 %,
-   * the ✓ chime when the bar completes, then `choose` once Zuko has grown back.
+   * the ✓ chime when the bar completes, then the chat about the file as Zuko grows back.
    */
   private stepSequence() {
     const since = UploadSeq.sinceDrop();
@@ -632,9 +686,9 @@ export class Island {
       Sound.play("approve");
       this.engine.triggerEmote("happy");
     }
-    // The extra second is the grow-back, after which the choose card is up.
-    if (since >= PRE_PROGRESS + dur + 1 && State.view === "uploading") {
-      this.setView("choose");
+    // No "what do you want to do with it" card: the chat opens on the file.
+    if (since >= PRE_PROGRESS + dur + CHAT_OPENS_AFTER_BAR && State.view === "uploading") {
+      this.askAboutFile();
     }
   }
 
@@ -644,6 +698,7 @@ export class Island {
     const { w, h } = islandSize(State.mode, State.view, {
       chatCount: State.chatHistory.length,
       approvalLines: approvalLines(State.pendingApproval, State.rubberStamp),
+      privacyOpen: State.privacyOpen,
     });
     const r = State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER;
     return { w, h, r };
@@ -879,7 +934,7 @@ export class Island {
     }
     if (!inIsland && this.wasInIsland) {
       this.fsm.mouseLeft();
-      if (this.fsm.state === "home" && !State.isPinned) {
+      if (this.fsm.state === "home" && !State.isPinned && !this.fsm.held) {
         this.homeCollapseAt = performance.now() + State.settings.autoCloseInterval * 1000;
       }
     }
@@ -1186,6 +1241,20 @@ export class Island {
         window.setTimeout(() => this.views.get("prompt")?.focus?.(), 120);
       } else if (wasChat) {
         void Bridge.focusWindow(false);
+      }
+    }
+
+    // The chat and the drop flow keep the island open: a fold-away in the middle of
+    // either brought the island back on the default view and lost the conversation.
+    const hold = State.mode === "expanded" && (HELD_VIEWS.has(State.view) || (State.view === "privacy" && State.privacyOpen));
+    if (hold !== this.fsm.held) {
+      this.fsm.hold(hold);
+      if (hold) {
+        this.homeCollapseAt = null;
+      } else if (!this.wasInIsland && this.fsm.state === "home" && !State.isPinned) {
+        // Left them with the pointer already elsewhere: the usual countdown starts now.
+        this.fsm.mouseLeft();
+        this.homeCollapseAt = performance.now() + State.settings.autoCloseInterval * 1000;
       }
     }
 

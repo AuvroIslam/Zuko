@@ -21,16 +21,15 @@ use ::windows::Win32::System::Registry::{
 };
 use ::windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use ::windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
-use ::windows::Win32::System::Ole::RevokeDragDrop;
 use ::windows::Win32::System::SystemInformation::GetLocalTime;
 use ::windows::Win32::System::Pipes::GetNamedPipeClientProcessId;
 use ::windows::Win32::System::Threading::{
     AttachThreadInput, GetCurrentProcess, GetExitCodeProcess, GetProcessTimes, OpenProcess, OpenProcessToken,
     QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
-use ::windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use ::windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VIRTUAL_KEY, VK_LBUTTON, VK_RBUTTON};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow,
+    BringWindowToTop, EnumWindows, GetCursorPos, GetForegroundWindow, GetWindow,
     GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
     IsWindowVisible, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, SwitchToThisWindow, GWL_EXSTYLE, GW_OWNER,
     SW_RESTORE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
@@ -184,10 +183,13 @@ pub fn cursor_physical() -> Option<(f64, f64)> {
     Some((p.x as f64, p.y as f64))
 }
 
-/// True while the left mouse button is held — the only signal we get that a
-/// drag might be in flight before it reaches the window.
-pub fn left_button_down() -> bool {
-    unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 }
+/// True while a mouse button that can drag is held — the only signal we get that a
+/// drag might be in flight before it reaches the window. Both buttons: Explorer drags
+/// with either, and GetAsyncKeyState reads the physical buttons, so with the buttons
+/// swapped a plain drag holds the physical right one.
+pub fn drag_button_down() -> bool {
+    let down = |vk: VIRTUAL_KEY| unsafe { (GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000) != 0 };
+    down(VK_LBUTTON) || down(VK_RBUTTON)
 }
 
 // ── Island window ─────────────────────────────────────────────────────────────
@@ -200,37 +202,16 @@ fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {
     Some(HWND(raw as *mut _))
 }
 
-/// Lets dropped files reach the app again.
-///
-/// wry installs its drop target by walking the webview's child windows **once**,
-/// when the webview is created. WebView2 creates `Chrome_RenderWidgetHostHWND`
-/// later and registers its own target on it; being the innermost window, that one
-/// wins, and since the page has no HTML5 drop handler it refuses everything — the
-/// "no drop" cursor, with nothing reaching Tauri. Revoking it makes OLE fall
-/// through to the target wry registered on the parent widget, which is the one
-/// that feeds Tauri's drag events.
+/// Makes dropped files reach the app: Zuko's own drop target on each window and on
+/// every WebView2 window inside it (see `win_drop`).
 ///
 /// Cheap and idempotent, so it is simply re-run whenever a drag might be starting.
-pub fn unblock_webview_drops(app: &AppHandle) {
+pub fn claim_file_drops(app: &AppHandle) {
     for label in [WINDOW_LABEL, "settings"] {
         let Some(win) = app.get_webview_window(label) else { continue };
         let Some(hwnd) = hwnd_of(&win) else { continue };
-        unsafe {
-            let _ = EnumChildWindows(Some(hwnd), Some(revoke_render_widget), LPARAM(0));
-        }
+        super::win_drop::claim(app, label, hwnd);
     }
-}
-
-unsafe extern "system" fn revoke_render_widget(hwnd: HWND, _: LPARAM) -> BOOL {
-    let mut name = [0u16; 64];
-    let len = unsafe { GetClassNameW(hwnd, &mut name) };
-    if len > 0 {
-        let class = String::from_utf16_lossy(&name[..len as usize]);
-        if class == "Chrome_RenderWidgetHostHWND" {
-            let _ = unsafe { RevokeDragDrop(hwnd) };
-        }
-    }
-    true.into()
 }
 
 /// WS_EX_NOACTIVATE keeps clicks from stealing focus; WS_EX_TOOLWINDOW keeps the

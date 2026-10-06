@@ -457,7 +457,7 @@ export function buildViews(
   map.set("note", buildNote());
   map.set("settings", buildSettings(actions));
   map.set("activity", buildActivity(actions));
-  map.set("privacy", buildPrivacy(actions));
+  map.set("privacy", buildPrivacy(actions, onChatHeightChange));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());

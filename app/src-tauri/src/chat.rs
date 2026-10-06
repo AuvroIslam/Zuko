@@ -22,7 +22,9 @@
 //   webview cannot ask for an arbitrary path.
 // * When placeholders appear anywhere in the conversation, `mask::legend` is appended to
 //   the system prompt so the model knows what each one stands for, without the values.
-// * The reply is rehydrated locally before it is returned to the island.
+// * The reply is rehydrated locally before it is returned to the island. With it come
+//   the masked message and the start of the masked file, exactly as the model received
+//   them, so the island can show what left the machine. Only placeholders, never values.
 // * A conversation belongs to one provider. Switching providers starts a new one, so
 //   what was said to the local model is never replayed to a cloud provider later.
 // * Nothing here is logged with message content, and no key is ever logged.
@@ -56,6 +58,8 @@ use crate::{files, sanitize, secrets};
 
 /// A file's text is inlined up to this many characters; a bigger one is refused.
 const MAX_INLINE_TEXT: usize = 200_000;
+/// How much of the masked file the island shows under the message that sent it.
+const SENT_PREVIEW_CHARS: usize = 1_500;
 
 const PERSONA: &str = "You are Zuko, a friendly privacy guardian who lives at the top of the user's screen. \
 You keep the user's secrets and personal data on their machine and still help with absolutely anything — research, coding, finding places, recommendations, tasks, questions.";
@@ -239,6 +243,20 @@ pub struct MaskedKey {
     pub label: String,
 }
 
+/// The dropped file as the model received it: masked.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentFile {
+    /// The file's name, masked like everything else.
+    pub name: String,
+    /// "text" | "markdown" | "code" | "pdf"
+    pub kind: String,
+    /// The start of the masked text (placeholders only, never a value).
+    pub preview: String,
+    /// The whole masked text's length, in characters.
+    pub chars: usize,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatReply {
@@ -246,6 +264,10 @@ pub struct ChatReply {
     pub text: String,
     /// What was masked before this turn left the machine.
     pub masked: Vec<MaskedKey>,
+    /// The user's message exactly as the model received it (masked).
+    pub sent: String,
+    /// The file that rode along with it, as the model received it.
+    pub sent_file: Option<SentFile>,
     /// The engine's report for the outgoing message, for the privacy notice.
     #[serde(skip)]
     pub report: MaskReport,
@@ -371,7 +393,7 @@ where
 
     // Real values come back only here, on this machine.
     let (text, _restored) = engine.with_vault(|v| mask::rehydrate_text(v, &text));
-    Ok(ChatReply { text, masked: turn.masked, report: turn.report })
+    Ok(ChatReply { text, masked: turn.masked, sent: turn.sent, sent_file: turn.sent_file, report: turn.report })
 }
 
 /// The text blocks of an assistant message, joined.
@@ -423,6 +445,9 @@ struct Turn {
     content: Vec<Value>,
     masked: Vec<MaskedKey>,
     report: MaskReport,
+    /// The message and the file as they go out (masked), for the island to show.
+    sent: String,
+    sent_file: Option<SentFile>,
 }
 
 fn prepare_turn(engine: &Engine, first_message: bool, query: &str, context: Option<&ChatContext>) -> Result<Turn, String> {
@@ -438,14 +463,23 @@ fn prepare_turn(engine: &Engine, first_message: bool, query: &str, context: Opti
     };
 
     let mut content: Vec<Value> = Vec::new();
+    let mut sent_file = None;
 
     // File / window context rides along with the first message only.
     if first_message {
         match context {
             Some(ChatContext::File { name, path }) => {
                 let (kind, body) = file_text(path)?;
-                content.push(json!({ "type": "text", "text": format!("File contents ({kind}):\n{}", mask_text(&body)) }));
-                content.push(json!({ "type": "text", "text": format!("File: {}", mask_text(name)) }));
+                let body = mask_text(&body);
+                let name = mask_text(name);
+                content.push(json!({ "type": "text", "text": format!("File contents ({kind}):\n{body}") }));
+                content.push(json!({ "type": "text", "text": format!("File: {name}") }));
+                sent_file = Some(SentFile {
+                    name,
+                    kind,
+                    preview: body.chars().take(SENT_PREVIEW_CHARS).collect(),
+                    chars: body.chars().count(),
+                });
             }
             Some(ChatContext::Window { app_name, title, url }) => {
                 let mut text = format!("Context — App: {app_name}, Window: {title}");
@@ -457,7 +491,8 @@ fn prepare_turn(engine: &Engine, first_message: bool, query: &str, context: Opti
             None => {}
         }
     }
-    content.push(json!({ "type": "text", "text": mask_text(query) }));
+    let sent = mask_text(query);
+    content.push(json!({ "type": "text", "text": sent.clone() }));
 
     if report.count > 0 {
         engine.persist_vault();
@@ -469,7 +504,7 @@ fn prepare_turn(engine: &Engine, first_message: bool, query: &str, context: Opti
             .map(|k| MaskedKey { key: k.clone(), label: v.get(k).map(|e| e.label.clone()).unwrap_or_default() })
             .collect()
     });
-    Ok(Turn { content, masked, report })
+    Ok(Turn { content, masked, report, sent, sent_file })
 }
 
 /// The text of a dropped file, by its inbox path: ("text" | "markdown" | "code" |

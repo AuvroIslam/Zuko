@@ -248,7 +248,7 @@ pub fn cursor_physical() -> Option<(f64, f64)> {
     None
 }
 
-pub fn left_button_down() -> bool {
+pub fn drag_button_down() -> bool {
     false
 }
 
@@ -290,8 +290,8 @@ fn gtk_window_ptr(win: &gtk::ApplicationWindow) -> *mut gtk::ffi::GtkWindow {
     w.to_glib_none().0
 }
 
-/// WebKitGTK has no competing drop target to remove.
-pub fn unblock_webview_drops(_app: &AppHandle) {}
+/// WebKitGTK delivers file drops to Tauri's handler: nothing to claim.
+pub fn claim_file_drops(_app: &AppHandle) {}
 
 /// Turns the island into an overlay surface on the top edge that never takes
 /// the keyboard. Must run before the window is first shown: a layer surface

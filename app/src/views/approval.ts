@@ -1,7 +1,7 @@
 // The approval card: a PermissionRequest with Zuko's risk verdict on it.
 //
 // Friction follows the verdict (ZukoHookInfo.friction):
-//   none    → Deny / Allow, like Coucou's card.
+//   none    → plain Deny / Allow.
 //   hold    → Allow becomes "Hold to allow": it fills only while pressed and the
 //             decision is sent when it is full. Letting go early resets it.
 //   blocked → no Allow at all; the reason is shown and Deny is the only answer.
@@ -76,7 +76,7 @@ function noteFor(info: ApprovalInfo, friction: EffectiveFriction): { text: strin
 
 /**
  * Optional lines on the card (factors + note), for the island height. Null when
- * the request has no verdict, which keeps Coucou's compact card.
+ * the request has no verdict, which keeps the compact card.
  */
 export function approvalLines(info: ApprovalInfo | null, guard: RubberStampGuard): number | null {
   if (!info?.zuko) return null;

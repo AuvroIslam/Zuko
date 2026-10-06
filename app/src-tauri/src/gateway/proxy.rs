@@ -246,6 +246,61 @@ struct Report {
     count: usize,
     keys: Vec<String>,
     labels: Vec<String>,
+    /// The newest message as it went upstream (masked), for the notice's "See what was sent".
+    sent: Option<String>,
+}
+
+/// How much of the newest message a notice carries.
+const SENT_PREVIEW_CHARS: usize = 4_000;
+
+/// The text of the newest message in a (masked) request: what the user typed and what
+/// tools gave back (a file Claude read lands here). Truncated for the notice.
+fn newest_text(body: &Value) -> Option<String> {
+    let content = newest_message(body)?.get("content")?;
+    let mut parts: Vec<String> = Vec::new();
+    let text_of = |v: &Value| -> Option<String> {
+        match v {
+            Value::String(s) => Some(s.clone()),
+            Value::Array(items) => Some(
+                items
+                    .iter()
+                    .filter_map(|b| b.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            _ => None,
+        }
+    };
+    match content {
+        Value::String(s) => parts.push(s.clone()),
+        Value::Array(blocks) => {
+            for b in blocks {
+                match b.get("type").and_then(Value::as_str) {
+                    Some("text") => {
+                        let t = b.get("text").and_then(Value::as_str).unwrap_or_default();
+                        if !t.trim_start().starts_with("<system-reminder>") {
+                            parts.push(t.to_string());
+                        }
+                    }
+                    Some("tool_result") => {
+                        if let Some(t) = b.get("content").and_then(text_of) {
+                            parts.push(format!("[tool result]\n{t}"));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => return None,
+    }
+    let text = parts.into_iter().filter(|p| !p.trim().is_empty()).collect::<Vec<_>>().join("\n\n");
+    if text.trim().is_empty() {
+        return None;
+    }
+    if text.chars().count() > SENT_PREVIEW_CHARS {
+        return Some(text.chars().take(SENT_PREVIEW_CHARS).collect::<String>() + "\n…");
+    }
+    Some(text)
 }
 
 async fn masked(shared: Arc<Shared>, req: Request<Incoming>, route: &'static str, url: String, upstream: String, label: String) -> Response<Body> {
@@ -317,6 +372,7 @@ async fn masked(shared: Arc<Shared>, req: Request<Incoming>, route: &'static str
             labels: r.labels.clone(),
             new_keys: o.masked.new_keys.clone(),
             input_sha256: body_digest(&raw),
+            sent: r.sent.clone(),
         });
     }
     shared.host.dump(&m.body);
@@ -412,6 +468,7 @@ fn mask_body(host: &Host, raw: &Bytes, want_scan: bool) -> Option<Masked> {
         }
     }
     let report = (count > 0).then(|| Report {
+        sent: newest_text(&body),
         count,
         labels: keys.iter().map(|k| vault.get(k).map(|e| e.label.clone()).unwrap_or_default()).collect(),
         keys,

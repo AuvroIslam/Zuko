@@ -237,13 +237,31 @@ function chatStatus(provider: ChatProvider): ChatStatus {
   };
 }
 
-function chatSend(query: string): ChatReply {
+/** The demo statement's text as the model would get it from a dropped PDF: masked. */
+const DEMO_FILE_MASKED = [
+  "Acme Demo Bank", "Monthly statement - September 2026", "Customer details",
+  "Name {{NAME_1}}", "Address {{ADDRESS_1}}", "Phone {{PHONE_1}}", "Email {{EMAIL_1}}",
+  "Card {{CARD_1}}", "Bank account (IBAN) {{IBAN_1}}", "Transactions",
+  "03 Sep Grocery store -2,450.00 BDT", "10 Sep Salary - Acme Corp +85,000.00 BDT",
+  "18 Sep Electricity bill -3,120.00 BDT", "27 Sep Online subscription -950.00 BDT",
+  "Developer note", "Statement API key: {{API_KEY_1}}",
+].join("\n");
+
+function chatSend(query: string, context: { kind?: string; name?: string } | null): ChatReply {
   const masked = maskDemo(query);
   const p = mockSettings.chatProvider;
   const where = p === "ollama" ? "on this PC" : `after masking ${masked.report.count} value(s)`;
+  const file = context?.kind === "file";
   return {
     text: `(${CHAT_PROVIDER_LABEL[p]} · ${chatModel(mockSettings)}, ${where}) Here is what I'd do: keep the key in .env and load it from the environment.`,
-    masked: masked.report.keys.map((key) => ({ key, label: vault.find((v) => v.key === key)?.label ?? key })),
+    masked: [
+      ...masked.report.keys.map((key) => ({ key, label: vault.find((v) => v.key === key)?.label ?? key })),
+      ...(file ? ["Person name", "Street address", "Phone", "Email", "Card", "IBAN", "OpenAI API key"].map((label, i) => ({ key: `F${i}`, label })) : []),
+    ],
+    sent: masked.text,
+    sentFile: file
+      ? { name: context?.name ?? "file", kind: "pdf", preview: DEMO_FILE_MASKED, chars: DEMO_FILE_MASKED.length }
+      : null,
   };
 }
 
@@ -333,6 +351,11 @@ function unmaskDemo(text: string): UnmaskTextResult {
 }
 
 const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
+  // A dropped file, as if copied into the inbox.
+  ingest_file: (a) => {
+    const name = String(a.path).split(/[\\/]/).pop() || "file";
+    return { name, path: `${HOME}\\AppData\\Local\\Zuko\\inbox\\${name}`, size: 48213 };
+  },
   boot: (): BootInfo => ({
     settings: { ...mockSettings },
     screen: { x: 0, y: 0, width: 1920, height: 1080, scale: 1 },
@@ -359,7 +382,7 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
   secret_clear: (a) => void storedKeys.delete(String(a.key)),
   chat_models: (a) => chatModels(a.provider as ChatProvider),
   chat_status: (a) => chatStatus((a.provider as ChatProvider | null) ?? mockSettings.chatProvider),
-  chat_send: (a) => chatSend(String(a.query)),
+  chat_send: (a) => chatSend(String(a.query), (a.context as { kind?: string; name?: string } | null) ?? null),
   protection_status: () => ({ ...status }),
   protection_preview: (a): HookPreview => {
     const o = a.options as InstallOptions;
@@ -634,7 +657,9 @@ function permissionRequest(kind: string) {
 function privacy(e: Partial<PrivacyEvent>) {
   emit("privacy", {
     source: "gateway", direction: "masked", count: 2, keys: ["API_KEY_1", "EMAIL_1"],
-    labels: ["OpenAI API key", "Email"], newKeys: ["EMAIL_1"], sessionId: "s-7f3a", maskedPrompt: null, ...e,
+    labels: ["OpenAI API key", "Email"], newKeys: ["EMAIL_1"], sessionId: "s-7f3a",
+    maskedPrompt: "My API key is {{API_KEY_1}} — put it in .env and mail the invoice to {{EMAIL_1}} when the build passes.",
+    ...e,
   });
 }
 
@@ -770,6 +795,20 @@ const SCENES: Record<string, (island: Island) => void> = {
     island.alert("settings");
   },
   // The island chat with its provider header (`&provider=openai|ollama` to switch).
+  // A PDF dropped on the island: the scan, then the "what do you want to do" card.
+  "drop-choose": (island) => {
+    State.isPinned = true;
+    const drop = (e: { type: string; paths?: string[] }) =>
+      (island as unknown as { onDragDrop(e: { type: string; paths?: string[] }): void }).onDragDrop(e);
+    const path = `${HOME}\\Downloads\\bank_statement_demo.pdf`;
+    window.setTimeout(() => drop({ type: "enter", paths: [path] }), 300);
+    window.setTimeout(() => drop({ type: "drop", paths: [path] }), 1100);
+  },
+  // A masking notice arrives while the user is in the chat: the chat stays.
+  "chat-privacy": (island) => {
+    SCENES.chat(island);
+    window.setTimeout(() => privacy({}), 900);
+  },
   chat: (island) => {
     State.isPinned = true;
     State.chatHistory = [

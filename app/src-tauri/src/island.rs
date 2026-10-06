@@ -16,7 +16,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
 
-use crate::platform::{self, cursor_physical, left_button_down};
+use crate::platform::{self, cursor_physical, drag_button_down};
 
 /// Logical size of the full window — the largest island view, like the macOS panel.
 pub const PANEL_W: f64 = 720.0;
@@ -395,7 +395,7 @@ fn update_click_through(app: &AppHandle, gate: &PollGate, force: bool) -> Option
     let size = (size.width as f64 / scale, size.height as f64 / scale);
     // Nowhere (NaN) when the cursor is unknown: off the island, still on the wake strip.
     let where_ = at.unwrap_or((f64::NAN, f64::NAN));
-    let down = left_button_down();
+    let down = drag_button_down();
     if let Some(ignore) = gate.click_through_change(where_, size, down, force) {
         if down {
             crate::log::line(format!("drag-diag: button down, click-through={ignore} at={where_:?} size={size:?}"));
@@ -459,11 +459,12 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                 // a button is held anywhere over the panel, the whole panel takes
                 // the mouse (`takes_mouse`), which also makes the drop zone as
                 // forgiving as the Mac's. A press may be the start of a drag: make
-                // sure the drop target is ours before the file arrives.
-                let down = left_button_down();
+                // sure the drop target is ours (`platform::claim_file_drops`) before
+                // the file arrives.
+                let down = drag_button_down();
                 if down && !was_down {
                     let handle = app.clone();
-                    let _ = app.run_on_main_thread(move || platform::unblock_webview_drops(&handle));
+                    let _ = app.run_on_main_thread(move || platform::claim_file_drops(&handle));
                 }
                 was_down = down;
 

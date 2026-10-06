@@ -246,6 +246,20 @@ export interface ChatReply {
   text: string;
   /** What was masked before the turn was sent (keys and labels, never values). */
   masked: { key: string; label: string }[];
+  /** The message exactly as the model received it: masked. */
+  sent: string;
+  /** The dropped file as the model received it (first message only), masked. */
+  sentFile: SentFile | null;
+}
+
+export interface SentFile {
+  /** The file's name, masked. */
+  name: string;
+  kind: "text" | "markdown" | "code" | "pdf" | string;
+  /** The start of the masked text. */
+  preview: string;
+  /** The whole masked text's length, in characters. */
+  chars: number;
 }
 
 export interface ChatModels {
@@ -686,12 +700,38 @@ export interface DragDropPayload {
   paths?: string[];
 }
 
-/** Files dragged onto the window. Only reaches us when the window takes the mouse. */
+/** `file-drag` from Zuko's own drop target (Windows, see platform/win_drop.rs). */
+interface FileDragEvent extends DragDropPayload {
+  label: string;
+}
+
+/**
+ * Files dragged onto the window. Only reaches us when the window takes the mouse.
+ * On Windows Zuko's own drop target reports them (`file-drag`, every window hears it
+ * and keeps its own); elsewhere Tauri's does. The same drop arriving from both, should
+ * Tauri's target ever still answer, is handled once.
+ */
 export async function onDragDrop(handler: (e: DragDropPayload) => void) {
   if (!IS_TAURI) return () => {};
-  return getCurrentWebview().onDragDropEvent((event) => {
-    handler(event.payload as DragDropPayload);
+  const webview = getCurrentWebview();
+  let lastDrop = { path: "", at: 0 };
+  const deliver = (e: DragDropPayload) => {
+    if (e.type === "drop") {
+      const path = e.paths?.[0] ?? "";
+      const now = performance.now();
+      if (path && path === lastDrop.path && now - lastDrop.at < 1000) return;
+      lastDrop = { path, at: now };
+    }
+    handler(e);
+  };
+  const own = await listen<FileDragEvent>("file-drag", (e) => {
+    if (e.payload.label === webview.label) deliver(e.payload);
   });
+  const tauri = await webview.onDragDropEvent((event) => deliver(event.payload as DragDropPayload));
+  return () => {
+    own();
+    tauri();
+  };
 }
 
 export async function onEvent<K extends BridgeEventName>(

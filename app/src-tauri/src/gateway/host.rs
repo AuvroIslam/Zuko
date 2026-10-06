@@ -39,6 +39,8 @@ pub struct MaskedReport<'a> {
     pub new_keys: Vec<String>,
     /// SHA-256 of the request body as received (before masking).
     pub input_sha256: String,
+    /// The newest message as it went upstream (masked): the notice's "See what was sent".
+    pub sent: Option<String>,
 }
 
 impl Host {
@@ -110,7 +112,7 @@ impl Host {
                 labels: r.labels.clone(),
                 new_keys: r.new_keys.clone(),
                 session_id: r.session_id.clone(),
-                masked_prompt: None,
+                masked_prompt: r.sent.clone(),
             },
         );
         events::activity(

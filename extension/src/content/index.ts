@@ -107,6 +107,7 @@ function main(site: SiteId): void {
       if (enabled) rehydrator.start();
       else rehydrator.stop();
     }
+    if (!enabled) overlay?.setSwitch({ visible: false, revealed: true, aiName: AI_NAME[site], pick: () => {} });
     chip?.setEnabled(enabled);
   };
 
@@ -191,9 +192,27 @@ function main(site: SiteId): void {
           restoredTimer = null;
         }, 2500);
       },
-      onToggle: (revealed) =>
-        notify("info", revealed ? "Showing real values again." : "Showing placeholders, as the AI sees them. Press Alt+R to restore.", 3500),
+      onToggle: (revealed) => {
+        paintSwitch();
+        notify(
+          "info",
+          revealed
+            ? "Your view: real values, on this computer only."
+            : `What ${AI_NAME[site]} got: the highlighted placeholders are all it ever saw of your data.`,
+          3500,
+        );
+      },
+      onTracked: () => paintSwitch(),
     });
+    const paintSwitch = () =>
+      ui().setSwitch({
+        visible: enabled && !!rehydrator?.hasRestored,
+        revealed: rehydrator?.isRevealed ?? true,
+        aiName: AI_NAME[site],
+        pick: (revealed) => {
+          if (rehydrator && rehydrator.isRevealed !== revealed) rehydrator.toggle();
+        },
+      });
 
     chip = new ComposerChip(document, site, ui(), (text) => send({ type: "scan", text }));
     chip.start();
@@ -221,3 +240,6 @@ function main(site: SiteId): void {
 }
 
 const EMPTY_MATCHER = () => new VariantMatcher([]);
+
+/** What each site's assistant is called on the view switch. */
+const AI_NAME: Record<SiteId, string> = { chatgpt: "ChatGPT", claude: "Claude", deepseek: "DeepSeek" };

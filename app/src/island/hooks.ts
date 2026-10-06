@@ -73,7 +73,7 @@ function stepLabel(tool: string, input: Record<string, unknown>): string {
 
 /**
  * The ticker line for a PreToolUse that carries Zuko's verdict: a block or a
- * question leads with what Zuko did, everything else reads like Coucou.
+ * question leads with what Zuko did, everything else is the plain step label.
  */
 function zukoStepLabel(tool: string, input: Record<string, unknown>, z: ZukoHookInfo | undefined): string {
   const plain = stepLabel(tool, input);
@@ -408,7 +408,7 @@ function handleHook(island: Island, payload: HookEventPayload) {
         island.dropPin();
         State.updateTask(CLAUDE_ID, "working");
         State.setPillBadge(CLAUDE_ID, null);
-        if (State.view === "approval") island.setView(State.defaultView());
+        if (State.view === "approval") island.leaveAlert();
         State.notify();
       }, 110_000);
       break;

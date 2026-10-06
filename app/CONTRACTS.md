@@ -17,7 +17,7 @@ It is the hook payload from Claude Code, **untruncated** (including `tool_respon
 | `hook_event_name` | always set (from the payload or argv) |
 | `zuko_wants_reply` | `true` if the relay will wait for an answer |
 | `zuko_env` | `{ "anthropicBaseUrl": <ANTHROPIC_BASE_URL or null>, "home": <home dir> }` from the relay's environment (Claude Code passes its env to hooks) |
-| `term_program`, `wt_session`, `term_session_id`, `vscode_pid`, `session_pid` | terminal context (unchanged from Coucou) |
+| `term_program`, `wt_session`, `term_session_id`, `vscode_pid`, `session_pid` | terminal context |
 | `zuko_agent` | from `--agent <name>` (third-party agents) |
 
 **Reply (app → hook):** one JSON object terminated by `\n`:
@@ -28,7 +28,7 @@ It is the hook payload from Claude Code, **untruncated** (including `tool_respon
 For `hook_event_name: "ZukoExtension"` (native host), the reply is `{"reply": <message>}`.
 The relay waits for a reply for `PreToolUse`, `PostToolUse`, `UserPromptSubmit`,
 `SessionStart` (budget 1.5 s each) and `PermissionRequest` (budget 110 s). For
-`PermissionRequest` the app keeps Coucou's acknowledgement logic internally: if the island
+`PermissionRequest` the app runs an acknowledgement check internally: if the island
 does not confirm the card within 800 ms, the app replies `{"stdout": null}` at once and
 Claude Code asks in the terminal; otherwise it replies when the human decides (≤ 108 s).
 Each reply is one line; the relay prints `stdout` verbatim. All other events are
@@ -44,17 +44,16 @@ fire-and-forget (the app closes the connection without replying).
 
 ## 2. Tauri commands (frontend → Rust)
 
-Existing Coucou commands keep their names (`boot`, `save_settings`, `set_collapsed`,
+The app's Tauri commands are `boot`, `save_settings`, `set_collapsed`,
 `set_island_rect`, `focus_window`, `reposition`, `open_url`, `open_in_vscode`, `quit_app`,
 `set_paused`, `hooks_status`, `hooks_preview`, `hooks_apply`, `approval_decision`,
 `approval_ack`, `approval_decline`, `log_line`, `chat_send`, `chat_reset`, `ingest_file`,
-`secret_present`, `secret_set`, `secret_clear`, `open_settings_window`). Removed:
-`refresh_integration`, `open_n8n`.
+`secret_present`, `secret_set`, `secret_clear` and `open_settings_window`.
 
 `save_settings` never changes `islandOffset` (a window that has not heard of the last drag
 must not move the island back); only the two commands below do.
 
-New commands (JS argument names are camelCase):
+Other commands (JS argument names are camelCase):
 
 | Command | Args | Returns |
 |---|---|---|

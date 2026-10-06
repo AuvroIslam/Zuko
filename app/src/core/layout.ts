@@ -110,6 +110,9 @@ export function approvalHeight(lines: number | null): number {
 // owns its own constants (USC) straight from UploadSequenceEngine.swift.
 
 /** Chat view grows with the conversation — IslandContainer.chatPromptHeight. */
+/** The privacy notice with the sent message showing under it. */
+export const PRIVACY_OPEN_HEIGHT = 300;
+
 export function chatPromptHeight(messageCount: number): number {
   return Math.min(300, 240 + messageCount * 40);
 }
@@ -119,6 +122,8 @@ export interface SizeExtras {
   chatCount?: number;
   /** See approvalHeight. */
   approvalLines?: number | null;
+  /** The privacy notice with "See what was sent" open. */
+  privacyOpen?: boolean;
 }
 
 export function islandSize(
@@ -139,7 +144,9 @@ export function islandSize(
           ? chatPromptHeight(extras.chatCount ?? 0)
           : view === "approval"
             ? approvalHeight(extras.approvalLines ?? null)
-            : VIEW_LAYOUTS[view].height;
+            : view === "privacy" && extras.privacyOpen
+              ? PRIVACY_OPEN_HEIGHT
+              : VIEW_LAYOUTS[view].height;
       return { w: EXPANDED_W, h };
     }
   }

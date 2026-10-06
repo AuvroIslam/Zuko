@@ -5,7 +5,7 @@
 // notice shows State.privacyNotice: what was masked before it left, or a
 // blocked prompt with a masked copy ready to paste.
 
-import { h, svg, clear, copyText } from "./dom";
+import { h, svg, clear, copyText, withPlaceholders } from "./dom";
 import { ICONS } from "./icons";
 import { btn, card, setWash, stack } from "./parts";
 import {
@@ -132,7 +132,7 @@ export function buildActivity(actions: ViewActions): ViewHost {
 
 // ── Privacy notice ────────────────────────────────────────────────────────────
 
-export function buildPrivacy(actions: ViewActions): ViewHost {
+export function buildPrivacy(actions: ViewActions, onResize: () => void): ViewHost {
   const icon = h("i", { class: "pv-icon" }, svg(ICONS.shield, 10));
   const source = h("span", { class: "n" });
   const sub = h("span", { class: "who-label" });
@@ -146,7 +146,15 @@ export function buildPrivacy(actions: ViewActions): ViewHost {
   const copy = h("button", { class: "btn primary" }, svg(ICONS.copy, 11), copyLabel);
   const ok = btn("OK", "secondary", () => actions.dismissPrivacy());
   const feed = h("button", { class: "link-btn pv-link", text: "Activity…", onclick: () => actions.setView("activity") });
-  const row = h("div", { class: "actions" }, copy, ok, h("div", { class: "grow" }), feed);
+  // The message as it went to the model (masked): Claude Code's newest turn through the
+  // gateway, typed text and tool results alike. Opening it keeps the island open.
+  const seeMore = h("button", { class: "link-btn pv-link", text: "See what was sent", onclick: () => {
+    State.privacyOpen = !State.privacyOpen;
+    shown = null;
+    State.notify();
+    onResize();
+  } });
+  const row = h("div", { class: "actions" }, copy, ok, h("div", { class: "grow" }), seeMore, feed);
 
   const cardEl = card("cyan", stack(116, 18, who, title, labels, masked, row));
   const el = h("div", { class: "view" }, cardEl);
@@ -165,13 +173,15 @@ export function buildPrivacy(actions: ViewActions): ViewHost {
   });
 
   let shown: unknown = null;
+  let shownOpen = false;
 
   return {
     el,
     sync() {
       const e = State.privacyNotice;
-      if (e === shown) return;
+      if (e === shown && State.privacyOpen === shownOpen) return;
       shown = e;
+      shownOpen = State.privacyOpen;
       if (!e) return;
       const blocked = e.direction === "blocked_prompt";
       const t = privacyText(e);
@@ -194,8 +204,14 @@ export function buildPrivacy(actions: ViewActions): ViewHost {
       labels.style.display = labels.childElementCount ? "" : "none";
       labels.classList.toggle("blocked", blocked);
 
-      masked.textContent = e.maskedPrompt ?? "";
-      masked.style.display = blocked && e.maskedPrompt ? "" : "none";
+      const open = !blocked && !!e.maskedPrompt && State.privacyOpen;
+      clear(masked);
+      if (blocked) masked.textContent = e.maskedPrompt ?? "";
+      else if (open) masked.append(withPlaceholders(e.maskedPrompt ?? ""));
+      masked.classList.toggle("sent", open);
+      masked.style.display = (blocked && e.maskedPrompt) || open ? "" : "none";
+      seeMore.style.display = !blocked && e.maskedPrompt ? "" : "none";
+      seeMore.textContent = open ? "Hide what was sent" : "See what was sent";
       copy.style.display = blocked && e.maskedPrompt ? "" : "none";
       copyLabel.textContent = "Copy masked prompt";
       ok.className = blocked && e.maskedPrompt ? "btn secondary" : "btn primary";

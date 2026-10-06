@@ -8,8 +8,7 @@
 //
 // Three independent pieces (`InstallOptions`):
 // * hooks     — one "zuko-hook" entry per event in HOOK_EVENTS. Entries whose
-//               command contains "zuko-hook" are ours; Coucou's "coucou-hook"
-//               leftovers are cleaned up too.
+//               command contains "zuko-hook" are ours.
 // * gateway   — env.ANTHROPIC_BASE_URL → the Zuko gateway. A previous, different
 //               base URL becomes the gateway's upstream and is restored verbatim on
 //               uninstall. DISABLE_BUG_COMMAND=1 and DISABLE_ERROR_REPORTING=1 are
@@ -58,8 +57,6 @@ pub const HOOK_EVENTS: &[(&str, u64)] = &[
 
 /// Marker that identifies a Zuko entry inside settings.json.
 const MARKER: &str = "zuko-hook";
-/// Coucou's relay, the app Zuko is forked from: its entries are cleaned up too.
-const LEGACY_MARKER: &str = "coucou-hook";
 /// Env vars set alongside the gateway, only when the user has not set them.
 const PRIVACY_ENV: &[&str] = &["DISABLE_BUG_COMMAND", "DISABLE_ERROR_REPORTING"];
 const BASE_URL: &str = "ANTHROPIC_BASE_URL";
@@ -245,14 +242,9 @@ fn entry_matches(entry: &Value, markers: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-/// A Zuko entry (what `status` reports as installed).
+/// A Zuko entry (what `status` reports as installed and uninstall removes).
 fn entry_is_ours(entry: &Value) -> bool {
     entry_matches(entry, &[MARKER])
-}
-
-/// A Zuko entry or a Coucou leftover (what uninstall removes).
-fn entry_is_removable(entry: &Value) -> bool {
-    entry_matches(entry, &[MARKER, LEGACY_MARKER])
 }
 
 /// True for the URL shape the Zuko gateway hands out:
@@ -369,12 +361,12 @@ fn plan_hooks(root: &mut Map<String, Value>, state: &mut InstallState, install: 
     }
 
     let hooks = root.get_mut("hooks").and_then(Value::as_object_mut).expect("checked above");
-    // Remove ours (and Coucou's) everywhere first: a reinstall must not duplicate.
+    // Remove ours everywhere first: a reinstall must not duplicate.
     let mut emptied: Vec<String> = Vec::new();
     for (event, value) in hooks.iter_mut() {
         if let Some(list) = value.as_array_mut() {
             let before = list.len();
-            list.retain(|e| !entry_is_removable(e));
+            list.retain(|e| !entry_is_ours(e));
             if list.len() != before && list.is_empty() {
                 emptied.push(event.clone());
             }
@@ -1173,11 +1165,11 @@ mod tests {
     }
 
     #[test]
-    fn coucou_leftovers_and_stateless_installs_are_cleaned_up() {
+    fn stale_entries_and_stateless_installs_are_cleaned_up() {
         let inputs = inputs();
         let shape = json!({"hooks": {
             "Stop": [
-                {"hooks": [{"type": "command", "command": "\"C:/old/coucou-hook.exe\" Stop"}]},
+                {"hooks": [{"type": "command", "command": "\"C:/old/zuko-hook.exe\" Stop"}]},
                 {"hooks": [{"type": "command", "command": "mine.exe"}]},
             ],
             "PreToolUse": [{"hooks": [{"type": "command", "command": "\"C:/x/zuko-hook.exe\" PreToolUse"}]}],
@@ -1189,7 +1181,7 @@ mod tests {
         let on = plan(&shape, None, &InstallOptions { hooks: true, ..NONE }, &inputs).unwrap();
         let stop = on.settings["hooks"]["Stop"].as_array().unwrap();
         assert_eq!(stop.len(), 2);
-        assert!(!pretty(&on.settings).contains("coucou-hook"));
+        assert!(!pretty(&on.settings).contains("C:/old/zuko-hook.exe"));
         assert_eq!(on.settings["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
         assert_eq!(on.settings["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], 120);
         assert_eq!(on.settings["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"], 10);

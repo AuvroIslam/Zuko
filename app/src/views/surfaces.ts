@@ -1,7 +1,6 @@
 // Protection surface cards, shown in the overview's left card when a pill is
 // focused and nothing live is running on it: Claude Code, Gateway, Browser and
-// Policy. They replace Coucou's service integration cards and read only from
-// State.protection and State.activity.
+// Policy. They read only from State.protection and State.activity.
 
 import { h, svg, dot } from "./dom";
 import { activityText, fmtCount, timeAgo, verdictMeta } from "./format";

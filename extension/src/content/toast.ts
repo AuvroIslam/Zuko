@@ -38,6 +38,13 @@ const CSS = `
 .chip.on { display: inline-flex; }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: #ffb347; box-shadow: 0 0 8px #ffb347; }
 .chip.warn .dot { background: #e0a030; box-shadow: 0 0 8px #e0a030; }
+.switch { position: fixed; right: 18px; bottom: 120px; pointer-events: auto; display: none; align-items: center; gap: 2px; padding: 3px; background: #1a100d; border: 1px solid #4a2d25; border-radius: 999px; box-shadow: 0 6px 22px rgba(0,0,0,.4); font: 600 12px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.switch.on { display: inline-flex; }
+.switch .tag { color: #ffb347; padding: 0 6px 0 8px; }
+.switch button { all: unset; cursor: pointer; color: #b59a88; padding: 5px 10px; border-radius: 999px; }
+.switch button:hover { color: #f6ece2; }
+.switch button.sel { color: #1a100d; background: #2ee6c5; }
+.switch button.sel.ai { background: #ffb347; }
 @keyframes in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .avatar { position: relative; flex: none; width: 26px; height: 26px; margin-top: -1px; }
 .avatar svg { display: block; width: 26px; height: 26px; }
@@ -53,6 +60,10 @@ export class Overlay {
   private readonly chipEl: HTMLElement;
   private readonly chipText: HTMLElement;
   private mounted = false;
+  private readonly switchEl: HTMLElement;
+  private readonly yoursBtn: HTMLButtonElement;
+  private readonly aiBtn: HTMLButtonElement;
+  private pick: (revealed: boolean) => void = () => {};
 
   constructor(doc: Document) {
     this.doc = doc;
@@ -85,7 +96,37 @@ export class Overlay {
     dot.className = "dot";
     this.chipText = doc.createElement("span");
     this.chipEl.append(dot, this.chipText);
-    root.append(this.layer, this.chipEl);
+    // "Your view | What ChatGPT got": the page in real values, or exactly as the AI has it.
+    this.switchEl = doc.createElement("div");
+    this.switchEl.className = "switch";
+    const tag = doc.createElement("span");
+    tag.className = "tag";
+    tag.textContent = "Zuko";
+    this.yoursBtn = doc.createElement("button");
+    this.yoursBtn.type = "button";
+    this.yoursBtn.textContent = "Your view";
+    this.yoursBtn.title = "Real values, restored on this computer only";
+    this.yoursBtn.addEventListener("click", () => this.pick(true));
+    this.aiBtn = doc.createElement("button");
+    this.aiBtn.type = "button";
+    this.aiBtn.addEventListener("click", () => this.pick(false));
+    this.switchEl.append(tag, this.yoursBtn, this.aiBtn);
+    root.append(this.layer, this.chipEl, this.switchEl);
+  }
+
+  /**
+   * The view switch: shown once something on the page was restored. `revealed` is the
+   * current view (true = real values); `pick` is called with the one the user chose.
+   */
+  setSwitch(opts: { visible: boolean; revealed: boolean; aiName: string; pick: (revealed: boolean) => void }): void {
+    this.mount();
+    this.pick = opts.pick;
+    this.aiBtn.textContent = `What ${opts.aiName} got`;
+    this.aiBtn.title = `Your messages and its replies exactly as ${opts.aiName} has them: placeholders, never your values (Alt+R)`;
+    this.switchEl.classList.toggle("on", opts.visible);
+    this.yoursBtn.classList.toggle("sel", opts.revealed);
+    this.aiBtn.classList.toggle("sel", !opts.revealed);
+    this.aiBtn.classList.toggle("ai", !opts.revealed);
   }
 
   private mount(): void {

@@ -18,6 +18,11 @@ export class IslandStateMachine {
   greetHoverCollapseDelay = 10;
   /** An alert waiting for an answer stays open, even when the mouse leaves. */
   pinned = false;
+  /**
+   * The open island is in use (the chat, the drop flow): it does not fold away on its
+   * own, or the conversation would vanish while the user reads or the model answers.
+   */
+  held = false;
 
   private petitHide: number | null = null;
   private homeCollapse: number | null = null;
@@ -102,6 +107,12 @@ export class IslandStateMachine {
     this.transition("hidden");
   }
 
+  /** See `held`. Holding cancels a fold-away already counting down. */
+  hold(on: boolean) {
+    this.held = on;
+    if (on) this.clear("homeCollapse");
+  }
+
   // ── Timers ──────────────────────────────────────────────────────────────────
 
   private schedulePetitHide() {
@@ -114,7 +125,7 @@ export class IslandStateMachine {
 
   private scheduleHomeCollapse() {
     this.clear("homeCollapse");
-    if (this.pinned) return;
+    if (this.pinned || this.held) return;
     this.homeCollapse = window.setTimeout(() => {
       this.homeCollapse = null;
       if (this.state === "home") this.transition("petit");

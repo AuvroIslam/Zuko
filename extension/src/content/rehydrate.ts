@@ -33,6 +33,8 @@ export interface RehydratorOptions {
   /** Called with the number of values restored by a batch. */
   onRestored?: (count: number, keys: string[]) => void;
   onToggle?: (revealed: boolean) => void;
+  /** Something was restored on the page (the view switch appears once there is). */
+  onTracked?: () => void;
   /** Debounce for mutation bursts (ms). */
   delayMs?: number;
   /** How long text must sit unchanged before a placeholder at its very end is restored (ms). */
@@ -66,6 +68,8 @@ const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "
 const NOTE_RE = /^\s*\[Zuko privacy note:[^\]]*\]\s*/;
 const SHOW_TEXT = 4;
 const HIGHLIGHT_NAME = "zuko-restored";
+/** The placeholders, while the page shows what the AI got. */
+const MASKED_HIGHLIGHT_NAME = "zuko-masked";
 
 export class Rehydrator {
   private readonly doc: Document;
@@ -87,6 +91,8 @@ export class Rehydrator {
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private observer: MutationObserver | null = null;
   private highlight: any = null;
+  private maskedHighlight: any = null;
+  private readonly onTracked?: () => void;
   private revealed = true;
   private running = false;
 
@@ -97,6 +103,7 @@ export class Rehydrator {
     this.source = opts.source;
     this.onRestored = opts.onRestored;
     this.onToggle = opts.onToggle;
+    this.onTracked = opts.onTracked;
     this.delayMs = opts.delayMs ?? 60;
     this.settleMs = opts.settleMs ?? 800;
     this.matcher = new VariantMatcher(this.source.keys());
@@ -165,8 +172,13 @@ export class Rehydrator {
       }
       node.nodeValue = this.revealed ? rec.restored : rec.masked;
     }
-    if (this.revealed) this.paintAll();
-    else this.highlight?.clear();
+    if (this.revealed) {
+      this.maskedHighlight?.clear();
+      this.paintAll();
+    } else {
+      this.highlight?.clear();
+      this.paintMasked();
+    }
     this.onToggle?.(this.revealed);
     return this.revealed;
   }
@@ -431,6 +443,7 @@ export class Rehydrator {
       this.records.set(node, rec);
       this.tracked.add(new WeakRef(node));
       this.paint(node, rec);
+      this.onTracked?.();
     });
     return { count: keys.length, keys, unresolved, deferred };
   }
@@ -442,11 +455,14 @@ export class Rehydrator {
     if (this.highlight || !win.CSS?.highlights || typeof win.Highlight !== "function") return;
     this.highlight = new win.Highlight();
     win.CSS.highlights.set(HIGHLIGHT_NAME, this.highlight);
+    this.maskedHighlight = new win.Highlight();
+    win.CSS.highlights.set(MASKED_HIGHLIGHT_NAME, this.maskedHighlight);
     try {
       if (typeof win.CSSStyleSheet === "function" && "adoptedStyleSheets" in this.doc) {
         const sheet = new win.CSSStyleSheet();
         sheet.replaceSync(
-          `::highlight(${HIGHLIGHT_NAME}) { background-color: rgba(46, 230, 197, 0.28); color: inherit; text-decoration: underline dotted rgba(46, 230, 197, 0.9); }`,
+          `::highlight(${HIGHLIGHT_NAME}) { background-color: rgba(46, 230, 197, 0.28); color: inherit; text-decoration: underline dotted rgba(46, 230, 197, 0.9); }
+::highlight(${MASKED_HIGHLIGHT_NAME}) { background-color: rgba(255, 179, 71, 0.3); color: inherit; text-decoration: underline wavy rgba(255, 140, 40, 0.9); }`,
         );
         (this.doc as any).adoptedStyleSheets = [...(this.doc as any).adoptedStyleSheets, sheet];
       }
@@ -474,6 +490,32 @@ export class Rehydrator {
         /* the node changed under us: skip this highlight */
       }
     }
+  }
+
+  /** What the AI got: every placeholder in the restored nodes, picked out. */
+  private paintMasked(): void {
+    if (!this.maskedHighlight) return;
+    this.maskedHighlight.clear();
+    for (const ref of this.tracked) {
+      const node = ref.deref();
+      if (!node || !node.isConnected) continue;
+      const text = node.nodeValue ?? "";
+      for (const m of text.matchAll(/\{\{[A-Z0-9_]+\}\}/g)) {
+        try {
+          const range = this.doc.createRange();
+          range.setStart(node, m.index ?? 0);
+          range.setEnd(node, (m.index ?? 0) + m[0].length);
+          this.maskedHighlight.add(range);
+        } catch {
+          /* the node changed under us */
+        }
+      }
+    }
+  }
+
+  /** True once anything on the page has been restored. */
+  get hasRestored(): boolean {
+    return this.tracked.size > 0;
   }
 
   private paintAll(): void {

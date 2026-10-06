@@ -26,6 +26,20 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
+/** `text` with every {{PLACEHOLDER}} in a `.ph` span, for masked text the user reads. */
+export function withPlaceholders(text: string): DocumentFragment {
+  const out = document.createDocumentFragment();
+  let at = 0;
+  for (const m of text.matchAll(/\{\{[A-Z0-9_]+\}\}/g)) {
+    const i = m.index ?? 0;
+    if (i > at) out.append(text.slice(at, i));
+    out.append(h("span", { class: "ph", text: m[0] }));
+    at = i + m[0].length;
+  }
+  out.append(text.slice(at));
+  return out;
+}
+
 export function svg(path: string, size = 14, opts: { fill?: string; stroke?: number } = {}): SVGSVGElement {
   const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   el.setAttribute("viewBox", "0 0 24 24");

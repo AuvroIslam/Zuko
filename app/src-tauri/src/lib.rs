@@ -176,9 +176,9 @@ fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
     shared.gate.collapsed.store(collapsed, Ordering::Relaxed);
     island::apply_geometry(&app, &pref, collapsed, offset);
     shared.gate.set_active(!collapsed);
-    // The cursor poll re-clears WebView2's own drop target whenever a press might start a
-    // drag, and it is parked while the island is hidden. Whatever the window is now (the
-    // wake strip or the panel), a file dragged onto it must still find Tauri's target.
+    // The cursor poll re-claims file drops whenever a press might start a drag, and it is
+    // parked while the island is hidden. Whatever the window is now (the wake strip or the
+    // panel), a file dragged onto it must still find Zuko's drop target.
     allow_file_drops(&app);
 }
 
@@ -583,19 +583,18 @@ fn keep_below_island(app: &AppHandle, win: &tauri::WebviewWindow) {
     let _ = win.set_position(tauri::PhysicalPosition::new(placed.x, placed.y));
 }
 
-/// The Documents drop zone needs dropped files to reach Tauri's drag events (the window
-/// keeps the default `drag_drop` handler; only WebView2's own drop target can get in
-/// the way, see `platform::unblock_webview_drops`). WebView2 registers that target a
-/// moment after the window first shows, so the fix is applied now and again shortly
-/// after; it is idempotent.
+/// The island and the Documents drop zone take dropped files through Zuko's own drop
+/// target (`platform::claim_file_drops`), never WebView2's. WebView2 creates more child
+/// windows a moment after the window first shows, so the claim is made now and again
+/// shortly after; it is idempotent.
 fn allow_file_drops(app: &AppHandle) {
     let now = app.clone();
-    let _ = app.run_on_main_thread(move || platform::unblock_webview_drops(&now));
+    let _ = app.run_on_main_thread(move || platform::claim_file_drops(&now));
     let later = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(600));
         let handle = later.clone();
-        let _ = later.run_on_main_thread(move || platform::unblock_webview_drops(&handle));
+        let _ = later.run_on_main_thread(move || platform::claim_file_drops(&handle));
     });
 }
 
