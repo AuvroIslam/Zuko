@@ -1,9 +1,3 @@
-# Local reference material — never committed
-coucou/
-comp_rules.md
-inspiration.md
-ref/
-
 # Dependencies and build output
 node_modules/
 target/

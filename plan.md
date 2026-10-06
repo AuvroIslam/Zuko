@@ -5,12 +5,8 @@
 > cloud model. It masks your secrets before they leave your machine and checks every
 > action the agent tries. It also stops you from approving dangerous things on reflex.
 
-Zuko is built on the MIT-licensed source code of
-[Coucou](https://github.com/Louis-CFM/coucou), a Tauri 2 desktop companion that
-already shows Claude Code sessions and relays permission requests. We keep its
-plumbing (hook relay, named pipe, island UI, settings window, keyring and
-installer) and replace its brand, character, sounds and service integrations with
-Zuko's security features. See `NOTICE.md` for what was and was not imported.
+Zuko is a Tauri 2 desktop app. Its plumbing (hook relay, named pipe, island UI,
+settings window, keyring and installer) carries Zuko's security features.
 
 ---
 
@@ -295,12 +291,12 @@ so slower machines should raise `timeoutMs` or use a smaller model.
 
 ---
 
-## 11. Rebrand (required by Coucou's asset license)
+## 11. Brand
 - Name **Zuko** everywhere: product name, bundle id `app.zuko.desktop`, `zuko.exe`, `zuko-hook.exe`, pipe `zuko-<SID>`, `%APPDATA%\Zuko`, keyring service `app.zuko.desktop`.
-- **The character, Zuko:** an unofficial chibi fan tribute to Prince Zuko from *Avatar: The Last Airbender*, drawn in code (`app/src/character/engine.ts`, fire in `fire.ts`). A big glossy cream sphere of a head (~70 % of the figure) with glowing amber almond eyes, the reddish scar round his left eye (the viewer's right), a black topknot in a red hair-tie whose ponytail swings on a spring, and a small Fire Nation tunic: maroon with a gold V collar, red neck scarf, gold-knotted belt, stubby sleeves with gold cuffs and cream fists with dark tips. Palette from the concept sheet: #F7F3EE, #E8D5C4, #F28A1E, #B33A2E, #2B1D1A. The eye glow takes the state colour (amber idle/working, yellow-amber pulsing for approvals, red-orange with a flame aura for errors, gold and happy when finished); expressions include determined, happy, angry, thinking, excited, sleepy, plus heart, star, wink, dizzy and the rest. Mini bots in the pills are simplified heads tinted by the pill colour. Distinct from Coucou's Mochi (no plain white ball with pill eyes, no blush or wave).
+- **The character, Zuko:** an unofficial chibi fan tribute to Prince Zuko from *Avatar: The Last Airbender*, drawn in code (`app/src/character/engine.ts`, fire in `fire.ts`). A big glossy cream sphere of a head (~70 % of the figure) with glowing amber almond eyes, the reddish scar round his left eye (the viewer's right), a black topknot in a red hair-tie whose ponytail swings on a spring, and a small Fire Nation tunic: maroon with a gold V collar, red neck scarf, gold-knotted belt, stubby sleeves with gold cuffs and cream fists with dark tips. Palette from the concept sheet: #F7F3EE, #E8D5C4, #F28A1E, #B33A2E, #2B1D1A. The eye glow takes the state colour (amber idle/working, yellow-amber pulsing for approvals, red-orange with a flame aura for errors, gold and happy when finished); expressions include determined, happy, angry, thinking, excited, sleepy, plus heart, star, wink, dizzy and the rest. Mini bots in the pills are simplified heads tinted by the pill colour.
 - **He firebends:** `shootFire(target)` (fire punch: the arm extends, the fist ignites, flame tongues wrap into it and a fireball flies to the target with an ember trail and bursts), `fireFlick(target)`, `setFireAura(on)`, `setFireRing(on)` and `fireSwirl()`. Fire that leaves the bot's box is drawn on a full-window effects canvas (`#fx-canvas`, pointer-events none); effects only keep the island at full frame rate while they animate. Triggers: a firewall block (PreToolUse `zuko.verdict` "deny" or a deny activity item) fire-punches the blocked line; a masked secret gets a flick at the privacy notice; a high/critical approval card keeps an aura simmering; an agent at work hovers him on a ring of fire; a triple-click throws a punch towards the click (six quick clicks still make him dizzy); the launch greeting lands him in a fire swirl and his fireball sets the island's edge alight; the drop scan burns secret lines into placeholder blocks with a sweep of fire.
 - New icon drawn in code (`scripts/gen-icons.mjs`) and new **synthesized** sounds (WebAudio, no audio files).
-- Coucou's service integrations (Stripe, n8n, GitHub, Vercel, Resend, Notion, Cal.com) are removed. Their pills become Zuko's protection surfaces: Claude Code, Gateway, Browser, Policy.
+- The pills are Zuko's protection surfaces: Claude Code, Gateway, Browser, Policy.
 
 ---
 
@@ -363,4 +359,3 @@ so slower machines should raise `timeoutMs` or use a smaller model.
 
 ## 16. Git conventions
 - Commit messages: at most 7 words. No co-author trailers.
-- `coucou/`, `comp_rules.md` and `inspiration.md` are local references and are git-ignored.
