@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quick start: Zuko docs</title>
+  <meta name="description" content="Install Zuko, switch protection on for Claude Code, add the browser extension and try it with safe fake data. Everything you need in one page.">
+  <meta name="theme-color" content="#c2410c">
+  <meta property="og:title" content="Zuko quick start">
+  <meta property="og:description" content="Install Zuko and protect Claude Code, ChatGPT, claude.ai and DeepSeek in a few minutes.">
+  <meta property="og:image" content="/assets/img/og.png">
+  <link rel="icon" type="image/png" href="/assets/img/favicon.png">
+  <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="topbar"></div>
+  <header class="site-header">
+    <nav class="nav wrap" aria-label="Main">
+      <a class="brand" href="/"><img src="/assets/img/favicon.png" alt="" width="38" height="38">Zuko</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">Menu</button>
+      <ul class="nav-links" id="nav-links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/docs" aria-current="page">Docs</a></li>
+        <li><a href="/download">Download</a></li>
+        <li><a href="https://github.com/AuvroIslam/Zuko">GitHub</a></li>
+        <li><a class="btn btn-primary btn-sm" href="/download">Get Zuko</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+    <div class="page-head">
+      <div class="wrap">
+        <div>
+          <span class="kicker">Docs</span>
+          <h1>Quick start</h1>
+          <p class="lead">Install Zuko, switch protection on, and see it mask a secret in about five minutes. Every example uses fake values, so nothing real is at risk.</p>
+        </div>
+        <img src="/assets/img/zuko-happy.webp" alt="" width="494" height="533">
+      </div>
+    </div>
+
+    <div class="wrap docs">
+      <nav class="toc" aria-label="On this page">
+        <p>Get started</p>
+        <ol>
+          <li><a href="#install">1. Install the app</a></li>
+          <li><a href="#protect">2. Turn on protection</a></li>
+          <li><a href="#extension">3. Add the extension</a></li>
+          <li><a href="#try">4. Try it</a></li>
+        </ol>
+        <p>Using Zuko</p>
+        <ol>
+          <li><a href="#policy">Your rules</a></li>
+          <li><a href="#shortcuts">Shortcuts</a></li>
+          <li><a href="#everyday">Everyday use</a></li>
+          <li><a href="#chat">Island chat</a></li>
+          <li><a href="#local-ai">Local AI</a></li>
+          <li><a href="#turn-off">Turning Zuko off</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+          <li><a href="#data">Where your data lives</a></li>
+          <li><a href="#faq">FAQ</a></li>
+        </ol>
+      </nav>
+
+      <article class="doc">
+        <h2 id="overview">Overview</h2>
+        <p>Zuko has two parts. The <b>desktop app</b> protects Claude Code (in the terminal or in VS Code) and gives you clipboard and document masking. The <b>browser extension</b> protects ChatGPT, claude.ai and DeepSeek. You can use either one alone.</p>
+        <div class="overview">
+          <a href="#install"><small>Step 1</small><span>Install the app</span></a>
+          <a href="#protect"><small>Step 2</small><span>Turn on protection</span></a>
+          <a href="#extension"><small>Step 3</small><span>Add the extension</span></a>
+          <a href="#try"><small>Step 4</small><span>Try it with fake data</span></a>
+        </div>
+        <div class="callout"><b>What you need:</b> Windows 10 or 11. For agent protection, <a href="https://claude.com/claude-code">Claude Code</a> logged in with any account (a Pro or Max subscription or an API key both work). For web chats, Chrome or Edge. You do not need any API key for Zuko itself.</div>
+
+        <h2 id="install">1. Install the app</h2>
+        <ol class="steps">
+          <li><a href="/download">Download</a> <code>Zuko-Windows-0.1.1-setup.exe</code> and run it. It installs for your user only and needs no admin rights.</li>
+          <li>Windows may say <b>"Windows protected your PC"</b> because the app is not code-signed yet. Click <b>More info</b>, then <b>Run anyway</b>.</li>
+          <li>Zuko appears as a small island at the <b>top of your screen</b>. Move your mouse to the island and click Zuko to open it. The <b>gear</b> opens Settings.</li>
+        </ol>
+
+        <h2 id="protect">2. Turn on protection for Claude Code</h2>
+        <ol class="steps">
+          <li>Open <b>Settings → Protection</b>.</li>
+          <li>Switch on <b>Hooks</b> and <b>Gateway</b>. Optionally switch on <b>Deny rules</b> too.</li>
+          <li>Click <b>Review changes…</b>. You see the exact change Zuko will make to <code>~/.claude/settings.json</code> and the name of the backup it takes first. Click <b>Apply</b>.</li>
+          <li><b>Restart Claude Code</b>: close and reopen the terminal session or the VS Code panel. The status dots in Settings → Protection turn green.</li>
+        </ol>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td>Hooks</td><td>Your rules, risk levels and plain-English approval cards on every tool call the agent makes.</td></tr>
+              <tr><td>Gateway</td><td>Routes Claude Code through Zuko on your PC, so secrets are masked before anything reaches the cloud. Works with a Claude Pro or Max login and with API keys.</td></tr>
+              <tr><td>Deny rules</td><td>Copies your blocked paths and domains into Claude Code's own deny list, which holds even when Zuko is closed.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn"><b>Important:</b> with Gateway on, Claude Code reaches the cloud through Zuko. If Zuko is closed, Claude Code cannot connect. Keep Zuko running, or turn Gateway off first (see <a href="#turn-off">Turning Zuko off</a>).</div>
+
+        <h2 id="extension">3. Add the browser extension</h2>
+        <ol class="steps">
+          <li><a href="/download#extension">Download</a> <code>Zuko-Extension-0.1.1.zip</code> and unzip it to a folder you will keep, for example <code>Documents\Zuko-Extension</code>.</li>
+          <li>Open <code>chrome://extensions</code> (or <code>edge://extensions</code>) and switch on <b>Developer mode</b>.</li>
+          <li>Click <b>Load unpacked</b> and choose the unzipped <b>Zuko-Extension</b> folder.</li>
+          <li>With the Zuko app running, press the <b>reload</b> button on the Zuko card once. The extension popup then shows <b>Desktop app: linked</b>, and it links by itself from then on.</li>
+        </ol>
+        <p>The extension also works without the app. Linked, both share one vault, so a key masked in Claude Code is the same <code>{{API_KEY_1}}</code> in ChatGPT.</p>
+
+        <h2 id="try">4. Try it</h2>
+        <p>Make an empty folder, open Claude Code in it, and paste these prompts. All the values are fake.</p>
+
+        <h3>Secrets stay on your PC</h3>
+        <div class="prompt">
+          <span class="label">Paste into Claude Code</span>
+          <pre><code>Create a file called reminder.txt with a short payment reminder for our customer Rahim Uddin. Include his phone +880 1712-345678, email rahim@acme-demo.io and the card on file 4242 4242 4242 4242.</code></pre>
+          <p class="expect"><b>You should see:</b> Zuko says "Masked 3 secrets before they left". <b>See what was sent</b> shows <code>{{PHONE_1}}</code>, <code>{{EMAIL_1}}</code> and <code>{{CARD_1}}</code>, yet <code>reminder.txt</code> has the real values.</p>
+        </div>
+
+        <h3>API keys never reach the AI</h3>
+        <div class="prompt">
+          <span class="label">Paste into Claude Code</span>
+          <pre><code>My OpenAI API key is sk-proj-ZUKO-FAKE-2f9x7Qm4Lp8Rt2Vw6Yz1Ab3Cd5Ef. Add it to a .env file as OPENAI_API_KEY.</code></pre>
+          <p class="expect"><b>You should see:</b> only <code>{{API_KEY_1}}</code> leaves your PC, and <code>.env</code> gets the real key.</p>
+        </div>
+
+        <h3>Look before you say yes</h3>
+        <div class="prompt">
+          <span class="label">Make a throwaway folder called old_build, then paste</span>
+          <pre><code>Delete the old_build folder and everything in it.</code></pre>
+          <p class="expect"><b>You should see:</b> a red card that says in plain English what will be deleted. A quick click does nothing: you have to <b>hold</b> Allow.</p>
+        </div>
+
+        <h3>Your rules</h3>
+        <div class="prompt">
+          <span class="label">Add imdb.com to Settings → Policy → Blocked domains, then paste</span>
+          <pre><code>Fetch https://www.imdb.com/chart/top/ and tell me the top 3 movies.</code></pre>
+          <p class="expect"><b>You should see:</b> Zuko blocks the request, and Claude says the site is on your blocked list.</p>
+        </div>
+
+        <h3>Web chats</h3>
+        <p>In ChatGPT, claude.ai or DeepSeek, type a message with a fake card or key and send it. A Zuko notice shows what was masked. Press <kbd>Alt</kbd>+<kbd>R</kbd> to switch between your view and what the AI actually received.</p>
+
+        <h2 id="policy">Your rules</h2>
+        <p><b>Settings → Policy</b> starts with sensible defaults. For example pastebin.com, webhook.site and <code>*.ngrok.io</code> are blocked, <code>~/.ssh</code> cannot be read, and <code>git push --force</code> is blocked. Add your own:</p>
+        <ul>
+          <li><b>Blocked domains:</b> sites the agent may never contact.</li>
+          <li><b>Blocked folders:</b> places the agent may never read, like <code>D:\Personal</code>.</li>
+          <li><b>Blocked commands:</b> patterns such as <code>git push --force*</code>.</li>
+          <li><b>Custom words:</b> client names or codenames to mask like any other secret.</li>
+        </ul>
+        <p>Click <b>Save policy</b>. Rules apply to the very next action. Switch <b>Mode</b> to Monitor if you only want to log decisions without blocking.</p>
+
+        <h2 id="shortcuts">Shortcuts</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Keys</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd></td><td>Masks the text on your clipboard, so you can paste it safely into any app.</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>U</kbd></td><td>Puts the real values back into the text on your clipboard.</td></tr>
+              <tr><td><kbd>Alt</kbd>+<kbd>R</kbd></td><td>In a web chat: switch between your view and what the AI received.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="everyday">Everyday use</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Task</th><th>How</th></tr></thead>
+            <tbody>
+              <tr><td>Open Zuko</td><td>Move the mouse to the island at the top of the screen and click Zuko. The gear opens Settings.</td></tr>
+              <tr><td>Move the island</td><td>Drag its header along the top edge. Double-click the header to centre it again.</td></tr>
+              <tr><td>Mask a document</td><td>Drop a <code>.txt</code>, <code>.md</code>, <code>.pdf</code> or code file on Zuko, or use Settings → Documents. You get a masked copy that is safe to share.</td></tr>
+              <tr><td>See what happened</td><td>Settings → Activity lists every masked secret and every decision.</td></tr>
+              <tr><td>Pause approval cards</td><td>Tray icon → Pause protection prompts. Your rules still apply.</td></tr>
+              <tr><td>Quit</td><td>Right-click the Zuko tray icon → Quit.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="chat">Island chat (optional)</h2>
+        <p>Zuko has a small chat of its own. In <b>Settings → Chat</b>, choose <b>Claude</b>, <b>OpenAI</b> or <b>Local (Ollama)</b>. Claude and OpenAI need your own API key, which is kept in Windows Credential Manager, and they only ever see masked text. With Ollama no key is needed and nothing leaves your PC.</p>
+
+        <h2 id="local-ai">Local AI (optional)</h2>
+        <p>Patterns catch keys, cards and phone numbers. To also find people's names and street addresses, Zuko can ask a small AI model that runs on your own PC.</p>
+        <ol class="steps">
+          <li>Install <a href="https://ollama.com">Ollama</a> and download the model (about 3.3 GB):
+            <pre><code>ollama pull gemma3:4b</code></pre></li>
+          <li>In <b>Settings → Local AI</b>, switch it on, choose <code>gemma3:4b</code>, click <b>Save</b>, then <b>Test</b>.</li>
+        </ol>
+        <p>A scan takes a few seconds on a typical laptop. The local AI can only make Zuko stricter, never looser.</p>
+
+        <h2 id="turn-off">Turning Zuko off</h2>
+        <p>Before you quit Zuko for good or uninstall it, undo its changes to Claude Code:</p>
+        <ol class="steps">
+          <li>Open <b>Settings → Protection</b> and switch everything off.</li>
+          <li>Click <b>Review changes…</b>, then <b>Apply</b>. Your previous settings come back exactly as they were.</li>
+          <li>Restart Claude Code. You can now quit or uninstall Zuko (Windows Settings → Apps).</li>
+        </ol>
+        <p>To remove the extension, open <code>chrome://extensions</code> and click <b>Remove</b> on the Zuko card.</p>
+
+        <h2 id="troubleshooting">Troubleshooting</h2>
+        <details><summary>Claude Code cannot connect</summary><p>Gateway is on but Zuko is not running. Start Zuko, or turn Gateway off in Settings → Protection, apply, and restart Claude Code.</p></details>
+        <details><summary>Nothing happens in Claude Code</summary><p>Restart Claude Code after clicking Apply. Then check that Settings → Protection shows Hooks as installed.</p></details>
+        <details><summary>The extension says "Desktop app: not linked"</summary><p>Keep Zuko running and check that Settings → Browser shows the bridge as registered (press Register if not). Then press reload on the extension card. It also finds the app by itself within about 30 seconds.</p></details>
+        <details><summary>Windows says "Windows protected your PC"</summary><p>The installer is not code-signed yet. Click More info, then Run anyway. You can check the file against the SHA-256 checksum on the <a href="/download">Download</a> page.</p></details>
+        <details><summary>A secret was not masked</summary><p>Detection is pattern-based, so an unusual format can slip through. Add it under Settings → Policy → Custom words, or switch on the optional Local AI for names and addresses.</p></details>
+
+        <h2 id="data">Where your data lives</h2>
+        <p>Everything stays on your PC.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Path</th><th>What</th></tr></thead>
+            <tbody>
+              <tr><td><code>%APPDATA%\Zuko\policy.json</code></td><td>Your rules</td></tr>
+              <tr><td><code>%LOCALAPPDATA%\Zuko\vault.bin</code></td><td>Masked values, encrypted with XChaCha20-Poly1305. The key is in Windows Credential Manager.</td></tr>
+              <tr><td><code>%LOCALAPPDATA%\Zuko\audit\</code></td><td>The hash-chained audit log. It never contains secret values.</td></tr>
+              <tr><td><code>%LOCALAPPDATA%\Zuko\inbox\</code></td><td>Files you dropped on Zuko and their masked copies</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="faq">FAQ</h2>
+        <details><summary>Does anything leave my PC?</summary><p>Only what you already send to your AI, with the secrets replaced by placeholders. Zuko has no server, no account and no telemetry.</p></details>
+        <details><summary>Is Zuko free?</summary><p>Yes. It is free and open source under the MIT License, with no subscription and no cloud bill.</p></details>
+        <details><summary>Will the AI still understand my request?</summary><p>Yes. Zuko tells the model what each placeholder is, for example that <code>{{API_KEY_1}}</code> is an OpenAI API key, so it can still do the work. Only answers that depend on the actual value, like "is this key valid?", are not possible.</p></details>
+        <details><summary>Which systems are supported?</summary><p>The desktop app runs on Windows 10 and 11. The browser extension runs in Chrome and Edge.</p></details>
+        <details><summary>Can I build it myself?</summary><p>Yes. The full source and build steps are on <a href="https://github.com/AuvroIslam/Zuko">GitHub</a>.</p></details>
+      </article>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div>
+          <a class="brand" href="/"><img src="/assets/img/favicon.png" alt="" width="38" height="38">Zuko</a>
+          <p>A privacy firewall and guardian for AI agents. Your private life stays private.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul><li><a href="/download">Download</a></li><li><a href="/docs">Quick start</a></li><li><a href="/#demo">Demo video</a></li></ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul><li><a href="https://github.com/AuvroIslam/Zuko">Source code</a></li><li><a href="https://github.com/AuvroIslam/Zuko/blob/main/LICENSE">MIT License</a></li><li><a href="https://github.com/AuvroIslam/Zuko/issues">Report an issue</a></li></ul>
+        </div>
+      </div>
+      <p class="footer-note">&copy; <span data-year>2026</span> Zuko contributors. Zuko's character is an unofficial fan tribute to Prince Zuko from Avatar: The Last Airbender. The app is not affiliated with or endorsed by Viacom International or Nickelodeon.</p>
+    </div>
+  </footer>
+  <script src="/assets/site.js" defer></script>
+</body>
+</html>

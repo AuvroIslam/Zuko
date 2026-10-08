@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zuko: a privacy firewall and guardian for AI agents</title>
+  <meta name="description" content="Zuko masks your API keys and personal data before they leave your PC, enforces your rules on every action your AI agent takes, and explains risky permissions in plain English. Free and open source.">
+  <meta name="theme-color" content="#c2410c">
+  <meta property="og:title" content="Zuko: your secrets stay on your PC">
+  <meta property="og:description" content="A privacy firewall and guardian for AI agents and AI chats. Free, local and open source.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/assets/img/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" href="/assets/img/favicon.png">
+  <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="topbar"></div>
+  <header class="site-header">
+    <nav class="nav wrap" aria-label="Main">
+      <a class="brand" href="/"><img src="/assets/img/favicon.png" alt="" width="38" height="38">Zuko</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">Menu</button>
+      <ul class="nav-links" id="nav-links">
+        <li><a href="/" aria-current="page">Home</a></li>
+        <li><a href="/docs">Docs</a></li>
+        <li><a href="/download">Download</a></li>
+        <li><a href="https://github.com/AuvroIslam/Zuko">GitHub</a></li>
+        <li><a class="btn btn-primary btn-sm" href="/download">Get Zuko</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div>
+          <span class="badge"><b>Free</b> &middot; open source &middot; runs on your PC</span>
+          <h1>Your secrets stay on <em class="hl">your PC</em>.</h1>
+          <p class="lead">Zuko is a privacy firewall and guardian for AI agents. It masks API keys and personal data before they leave your computer, enforces your rules on every action, and explains risky permissions in plain English.</p>
+          <div class="hero-actions">
+            <div>
+              <a class="btn btn-primary" href="/downloads/Zuko-Windows-0.1.1-setup.exe" download>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+                Download for Windows
+              </a>
+              <span class="btn-note">Version 0.1.1 &middot; 4 MB &middot; Windows 10 and 11</span>
+            </div>
+            <a class="btn btn-ghost" href="/download#extension">Get the browser extension</a>
+          </div>
+          <div class="works" aria-label="Works with">
+            Works with
+            <span class="pill">Claude Code</span><span class="pill">VS Code</span><span class="pill">ChatGPT</span><span class="pill">claude.ai</span><span class="pill">DeepSeek</span>
+          </div>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="glow"></div>
+          <img class="mascot" src="/assets/img/zuko-happy.webp" alt="" width="494" height="533">
+          <div class="toast toast-2">
+            <div class="t-title"><span class="dot"></span>Blocked: webhook.site</div>
+            <div>The agent tried to send <code style="background:none;color:#ffcf8a;padding:0">.env</code> to a site on your blocked list.</div>
+          </div>
+          <div class="toast">
+            <div class="t-title"><span class="dot"></span>Masked 3 secrets before they left</div>
+            <div class="chips">
+              <span class="chip">Phone <code>{{PHONE_1}}</code></span>
+              <span class="chip">Card <code>{{CARD_1}}</code></span>
+              <span class="chip">API key <code>{{API_KEY_1}}</code></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Problem -->
+    <section class="alt">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="kicker">The problem</span>
+          <h2>We trust AI with everything, and we stopped looking.</h2>
+          <p class="lead">AI agents now read our files, run commands and browse the web for us. Chatbots hear about our bills, health and bank accounts.</p>
+        </div>
+        <div class="grid-3">
+          <article class="card">
+            <div class="icon-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 9 5 12 1.8-5.2L21 14Z"/><path d="M7.2 2.2 8 5.1M5.1 8 2.2 7.2M14 4.1 12 6.2M6.2 12l-2.1 2"/></svg></div>
+            <h3>We click "Yes" without reading</h3>
+            <p>Agents ask for permission again and again. Tired users approve without looking, so one blind "Yes" can delete a folder or upload your <code>.env</code>.</p>
+            <p class="stat"><b>93%</b> of permission prompts get approved (Anthropic, 2026)</p>
+          </article>
+          <article class="card">
+            <div class="icon-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg></div>
+            <h3>We paste private info into AI</h3>
+            <p>API keys, phone numbers, card and bank details go straight to cloud servers and stay in chat logs. Once they are sent, you cannot take them back.</p>
+            <p class="stat"><b>23.8M</b> secrets leaked on GitHub in 2024 (GitGuardian, 2025)</p>
+          </article>
+          <article class="card">
+            <div class="icon-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/></svg></div>
+            <h3>We cannot set the rules</h3>
+            <p>There is no simple way to say "never open my Personal folder" or "never upload to pastebin". Files and web chats have no guard at all.</p>
+            <p class="stat"><b>OWASP</b> lists data leaks and excessive agency as top LLM risks</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Video -->
+    <section id="demo">
+      <div class="wrap">
+        <div class="section-head center">
+          <span class="kicker">Demo</span>
+          <h2>See Zuko in action</h2>
+          <p class="lead">Secrets masked, a risky delete explained, a blocked site, and ChatGPT protected, in about three minutes.</p>
+        </div>
+        <div class="video" data-youtube="jKiPvthC6DM">
+          <button type="button" aria-label="Play the Zuko demo video">
+            <img src="/assets/img/shot-privacy.webp" alt="" width="1600" height="1017" loading="lazy">
+            <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="#fff"><path d="M7 4.5v15l12.5-7.5Z"/></svg></span>
+            <span class="caption">Watch the demo &middot; about 3 minutes</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="alt">
+      <div class="wrap">
+        <div class="section-head center">
+          <span class="kicker">How it works</span>
+          <h2>The AI does the work. It never sees the secret.</h2>
+          <p class="lead">Zuko swaps every secret for a placeholder on your PC, and puts the real value back when the answer comes home.</p>
+        </div>
+        <div class="flow">
+          <div class="step local">
+            <span class="where">Your PC</span>
+            <h3>You type as usual</h3>
+            <p>Real keys, cards and phone numbers, in Claude Code or a web chat.</p>
+            <div class="sample">My key is <span class="real">sk-proj-7Qm4…</span>, put it in .env</div>
+          </div>
+          <div class="step local">
+            <span class="where">Your PC</span>
+            <h3>Zuko masks it</h3>
+            <p>Each secret is stored in an encrypted vault and replaced with a placeholder.</p>
+            <div class="sample">My key is <span class="ph">{{API_KEY_1}}</span>, put it in .env</div>
+          </div>
+          <div class="step">
+            <span class="where cloud">The cloud</span>
+            <h3>The AI answers</h3>
+            <p>The model only ever sees placeholders, and answers with them.</p>
+            <div class="sample">OPENAI_API_KEY=<span class="ph">{{API_KEY_1}}</span></div>
+          </div>
+          <div class="step local">
+            <span class="where">Your PC</span>
+            <h3>You get the real thing</h3>
+            <p>Zuko puts the real value back, so your file and your screen show it.</p>
+            <div class="sample">OPENAI_API_KEY=<span class="real">sk-proj-7Qm4…</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="kicker">What Zuko does</span>
+          <h2>One small guardian, four big jobs.</h2>
+        </div>
+
+        <div class="feature">
+          <div class="feature-text">
+            <span class="kicker">01 &middot; Privacy</span>
+            <h3 style="font-size:1.9rem">Your secrets never reach the model</h3>
+            <p class="lead">Everything Claude Code sends goes through Zuko's local gateway: prompts, files the agent reads, command output and IDE selections.</p>
+            <ul>
+              <li><b>50+ secret formats:</b> OpenAI, Anthropic, AWS, GitHub, Stripe, Google, JWTs, private keys, passwords and more.</li>
+              <li><b>Personal data:</b> emails, phone numbers, cards, IBANs and your own custom words. Optional local AI finds names and addresses.</li>
+              <li>The same value always gets the same placeholder, so conversations stay consistent.</li>
+            </ul>
+          </div>
+          <div class="feature-shot"><img src="/assets/img/shot-privacy.webp" alt="Zuko masking a phone number, card, IBAN and name before a Claude Code prompt leaves the PC, while the written file keeps the real values" width="1600" height="1017" loading="lazy"></div>
+        </div>
+
+        <div class="feature flip">
+          <div class="feature-text">
+            <span class="kicker">02 &middot; Permissions</span>
+            <h3 style="font-size:1.9rem">Look before you say yes</h3>
+            <p class="lead">Every action gets a risk level and a headline that leads with the consequence, like "DELETES the folders dist/ and .cache/".</p>
+            <ul>
+              <li><b>Low risk</b> passes silently, so you are not asked all day.</li>
+              <li><b>High risk</b> needs you to hold the Allow button. A reflex click does nothing.</li>
+              <li>Approve risky actions faster than anyone could read them, and Zuko slows you down.</li>
+            </ul>
+          </div>
+          <div class="feature-shot"><img src="/assets/img/shot-approval.webp" alt="A high-risk approval card explaining that a command deletes two folders, with a hold-to-allow button" width="1600" height="1017" loading="lazy"></div>
+        </div>
+
+        <div class="feature">
+          <div class="feature-text">
+            <span class="kicker">03 &middot; Your rules</span>
+            <h3 style="font-size:1.9rem">Your rules, enforced</h3>
+            <p class="lead">Block websites, folders, commands and tools. Zuko stops the call on the spot and tells the AI exactly why.</p>
+            <ul>
+              <li><b>Chain rules</b> catch a secret that was read from <code>.env</code> and then sent out, even base64 or hex encoded.</li>
+              <li><b>Self-protection:</b> the agent cannot edit Zuko's policy or switch Zuko off.</li>
+              <li>Every decision goes into a tamper-evident audit log that never holds secret values.</li>
+            </ul>
+          </div>
+          <div class="feature-shot"><img src="/assets/img/shot-rules.webp" alt="Zuko blocking a command that sends .env to webhook.site, a domain on the blocked list" width="1600" height="1017" loading="lazy"></div>
+        </div>
+
+        <div class="feature flip">
+          <div class="feature-text">
+            <span class="kicker">04 &middot; Files and web chats</span>
+            <h3 style="font-size:1.9rem">Files and web chats too</h3>
+            <p class="lead">The browser extension protects ChatGPT, claude.ai and DeepSeek, and the app cleans any document you want to share.</p>
+            <ul>
+              <li>Prompts and uploaded files are masked <b>before you hit send</b>. You still see the real values on your screen.</li>
+              <li>Drop a <code>.txt</code>, <code>.md</code>, <code>.pdf</code> or code file on Zuko to get a masked copy.</li>
+              <li><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd> masks the clipboard for any app; <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>U</kbd> restores it.</li>
+            </ul>
+          </div>
+          <div class="feature-shot"><img src="/assets/img/shot-files.webp" alt="Zuko's Documents settings showing a PDF invoice cleaned into a masked copy" width="1600" height="1017" loading="lazy"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Numbers -->
+    <section class="alt section-tight">
+      <div class="wrap">
+        <div class="numbers">
+          <div class="number"><b>100%</b><span>detection on our 51-scenario attack benchmark</span></div>
+          <div class="number"><b>0%</b><span>false blocks on the same benchmark</span></div>
+          <div class="number"><b>0.3 ms</b><span>per firewall decision</span></div>
+          <div class="number"><b>450+</b><span>automated tests passing</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Private by design -->
+    <section>
+      <div class="wrap">
+        <div class="section-head center">
+          <span class="kicker">Private by design</span>
+          <h2>Nothing to sign up for. Nothing to pay.</h2>
+        </div>
+        <div class="grid-4">
+          <article class="card"><h3>No account</h3><p>Download it and use it. There is nothing to register.</p></article>
+          <article class="card"><h3>No server</h3><p>Masking, rules and the vault all run on your own PC.</p></article>
+          <article class="card"><h3>No telemetry</h3><p>Zuko does not phone home. The optional local AI runs offline.</p></article>
+          <article class="card"><h3>Open source</h3><p>MIT licensed. Read every line on <a href="https://github.com/AuvroIslam/Zuko">GitHub</a>.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="section-tight" style="padding-top:0">
+      <div class="wrap">
+        <div class="cta">
+          <img src="/assets/img/zuko-ring.webp" alt="" width="386" height="613" loading="lazy">
+          <div>
+            <h2>Ready to keep your secrets?</h2>
+            <p>Install the app in a minute, switch protection on, and keep working the way you do now.</p>
+          </div>
+          <div class="cta-actions">
+            <a class="btn btn-primary" href="/download">Download Zuko</a>
+            <a class="btn btn-ghost" href="/docs">Read the quick start</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div>
+          <a class="brand" href="/"><img src="/assets/img/favicon.png" alt="" width="38" height="38">Zuko</a>
+          <p>A privacy firewall and guardian for AI agents. Your private life stays private.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul><li><a href="/download">Download</a></li><li><a href="/docs">Quick start</a></li><li><a href="/#demo">Demo video</a></li></ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul><li><a href="https://github.com/AuvroIslam/Zuko">Source code</a></li><li><a href="https://github.com/AuvroIslam/Zuko/blob/main/LICENSE">MIT License</a></li><li><a href="https://github.com/AuvroIslam/Zuko/issues">Report an issue</a></li></ul>
+        </div>
+      </div>
+      <p class="footer-note">&copy; <span data-year>2026</span> Zuko contributors. Zuko's character is an unofficial fan tribute to Prince Zuko from Avatar: The Last Airbender. The app is not affiliated with or endorsed by Viacom International or Nickelodeon.</p>
+    </div>
+  </footer>
+  <script src="/assets/site.js" defer></script>
+</body>
+</html>

@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">
+  <a href="https://zuko-lovat.vercel.app">Website</a> &nbsp;&middot;&nbsp;
   <a href="#download">Download</a> &nbsp;&middot;&nbsp;
   <a href="#demo-video">Demo video</a> &nbsp;&middot;&nbsp;
   <a href="#what-zuko-does">Features</a> &nbsp;&middot;&nbsp;
@@ -39,7 +40,9 @@ Everything runs on your machine. There is no account, no server and no telemetry
 
 ## Download
 
-**[Download Zuko 0.1.1 from Google Drive](https://drive.google.com/drive/folders/1sVIKkMBARmzDe3M-mxnzeI2wGeL7d8JA?usp=drive_link)**
+**[Download Zuko 0.1.1 from the website](https://zuko-lovat.vercel.app/download)**, or from the
+[Google Drive mirror](https://drive.google.com/drive/folders/1sVIKkMBARmzDe3M-mxnzeI2wGeL7d8JA?usp=drive_link).
+The website also has a [quick start guide](https://zuko-lovat.vercel.app/docs).
 
 | File | What it is |
 |---|---|
