@@ -47,25 +47,26 @@
     pre.appendChild(btn);
   });
 
-  // Docs: highlight the section being read.
+  // Docs: highlight the section being read (the last heading that has reached the top area).
   const tocLinks = Array.from(document.querySelectorAll(".toc a[href^='#']"));
-  if (tocLinks.length && "IntersectionObserver" in window) {
-    const byId = new Map(tocLinks.map((a) => [a.getAttribute("href").slice(1), a]));
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          tocLinks.forEach((a) => a.classList.remove("active"));
-          const link = byId.get(entry.target.id);
-          if (link) link.classList.add("active");
-        });
-      },
-      { rootMargin: "-90px 0px -70% 0px" }
-    );
-    byId.forEach((_, id) => {
-      const el = document.getElementById(id);
-      if (el) observer.observe(el);
-    });
+  const sections = tocLinks
+    .map((a) => ({ link: a, el: document.getElementById(a.getAttribute("href").slice(1)) }))
+    .filter((s) => s.el);
+  if (sections.length) {
+    let queued = false;
+    const update = () => {
+      queued = false;
+      let current = null;
+      for (const s of sections) if (s.el.getBoundingClientRect().top <= 160) current = s;
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      if (atBottom) current = sections[sections.length - 1];
+      tocLinks.forEach((a) => a.classList.toggle("active", !!current && a === current.link));
+    };
+    window.addEventListener("scroll", () => {
+      if (!queued) { queued = true; requestAnimationFrame(update); }
+    }, { passive: true });
+    window.addEventListener("hashchange", update);
+    update();
   }
 
   document.querySelectorAll("[data-year]").forEach((el) => (el.textContent = String(new Date().getFullYear())));
