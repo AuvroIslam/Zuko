@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Zuko",
+  "version": "0.1.1",
+  "identifier": "app.zuko.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420"
+    },
+    "windows": [
+      {
+        "label": "island",
+        "title": "Zuko",
+        "url": "index.html",
+        "width": 240,
+        "height": 6,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "visible": true,
+        "center": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "dragDropEnabled": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required"
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../target/release/zuko-hook.exe": "zuko-hook.exe",
+      "../target/release/zuko-native-host.exe": "zuko-native-host.exe"
+    },
+    "copyright": "© 2026 AuvroIslam",
+    "category": "DeveloperTool",
+    "shortDescription": "Zuko lives at the top of your screen",
+    "longDescription": "Zuko puts Zuko at the top of your screen: it shows your Claude Code sessions and a few integrations, and lets you approve, answer, chat and drop files without leaving what you are doing.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English", "French"],
+        "installerHooks": "nsis/hooks.nsh"
+      }
+    }
+  }
+}
