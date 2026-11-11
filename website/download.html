@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Download Zuko</title>
+  <meta name="description" content="Download the Zuko desktop app for Windows and the Zuko browser extension for Chrome and Edge. Free and open source.">
+  <meta name="theme-color" content="#c2410c">
+  <meta property="og:title" content="Download Zuko">
+  <meta property="og:description" content="The Zuko app for Windows and the browser extension for Chrome and Edge. Free and open source.">
+  <meta property="og:image" content="/assets/img/og.png">
+  <link rel="icon" type="image/png" href="/assets/img/favicon.png">
+  <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="topbar"></div>
+  <header class="site-header">
+    <nav class="nav wrap" aria-label="Main">
+      <a class="brand" href="/"><img src="/assets/img/favicon.png" alt="" width="38" height="38">Zuko</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">Menu</button>
+      <ul class="nav-links" id="nav-links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/docs">Docs</a></li>
+        <li><a href="/download" aria-current="page">Download</a></li>
+        <li><a href="https://github.com/AuvroIslam/Zuko">GitHub</a></li>
+        <li><a class="btn btn-primary btn-sm" href="/download">Get Zuko</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+    <div class="page-head">
+      <div class="wrap">
+        <div>
+          <span class="kicker">Download &middot; version 0.1.1</span>
+          <h1>Get Zuko</h1>
+          <p class="lead">Free, open source, and nothing to sign up for. Install the app to protect Claude Code, and add the extension to protect your web chats.</p>
+        </div>
+        <img src="/assets/img/zuko-ring.webp" alt="" width="386" height="613">
+      </div>
+    </div>
+
+    <section style="padding-top:8px">
+      <div class="wrap">
+        <div class="dl-grid">
+          <article class="dl-card main" id="app">
+            <span class="kicker">Desktop app</span>
+            <h2>Zuko for Windows</h2>
+            <p class="sub">Protects Claude Code in the terminal and in VS Code. Adds clipboard and document masking.</p>
+            <div class="dl-meta"><span>Windows 10 and 11</span><span>64-bit</span><span>4.0 MB</span><span>.exe installer</span></div>
+            <a class="btn btn-primary" href="/downloads/Zuko-Windows-0.1.1-setup.exe" download>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+              Download for Windows
+            </a>
+            <ol>
+              <li>Run the installer. It needs no admin rights.</li>
+              <li>If Windows says "Windows protected your PC", click <b>More info</b>, then <b>Run anyway</b>. The app is not code-signed yet.</li>
+              <li>Open Zuko's <b>Settings → Protection</b>, switch on Hooks and Gateway, and click <b>Apply</b>. <a href="/docs#protect">Full steps</a></li>
+            </ol>
+            <p class="hash">SHA-256 <code>cdbef90a1c051d6c60719e4351b6f14f0cdaddd13bdde6644f573dffdfd12c87</code></p>
+          </article>
+
+          <article class="dl-card" id="extension">
+            <span class="kicker">Browser extension</span>
+            <h2>Zuko for Chrome and Edge</h2>
+            <p class="sub">Protects ChatGPT, claude.ai and DeepSeek. Works on its own or linked to the app.</p>
+            <div class="dl-meta"><span>Chrome</span><span>Edge</span><span>0.9 MB</span><span>.zip</span></div>
+            <a class="btn btn-primary" href="/downloads/Zuko-Extension-0.1.1.zip" download>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+              Download the extension
+            </a>
+            <ol>
+              <li>Unzip it to a folder you will keep.</li>
+              <li>Open <code>chrome://extensions</code> or <code>edge://extensions</code> and switch on <b>Developer mode</b>.</li>
+              <li>Click <b>Load unpacked</b> and choose the <b>Zuko-Extension</b> folder. <a href="/docs#extension">Full steps</a></li>
+            </ol>
+            <p class="hash">SHA-256 <code>a6b66e44f1f3f60ec3cd38c9a6eeaaa187f085c1865fa893e6cbc075eb742ee4</code></p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="alt">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="kicker">What's in 0.1.1</span>
+          <h2>Everything you need, nothing you don't.</h2>
+        </div>
+        <div class="req">
+          <article class="card">
+            <h3>Privacy</h3>
+            <p>Masks 50+ secret formats and personal data before they leave your PC, and puts the real values back locally. Encrypted vault, tamper-evident audit log.</p>
+          </article>
+          <article class="card">
+            <h3>Control</h3>
+            <p>Risk levels on every agent action, plain-English approval cards, hold-to-allow for risky ones, and your own blocked sites, folders and commands.</p>
+          </article>
+          <article class="card">
+            <h3>Everywhere you use AI</h3>
+            <p>Claude Code in the terminal and VS Code, ChatGPT, claude.ai and DeepSeek, plus clipboard and document masking for any other app.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-tight">
+      <div class="wrap">
+        <div class="req">
+          <article class="card">
+            <h3>Requirements</h3>
+            <p>Windows 10 or 11 (64-bit). Claude Code for agent protection. Chrome or Edge for the extension. Ollama is optional, for the local AI.</p>
+          </article>
+          <article class="card">
+            <h3>Other mirror</h3>
+            <p>The same files are also on <a href="https://drive.google.com/drive/folders/1sVIKkMBARmzDe3M-mxnzeI2wGeL7d8JA?usp=drive_link">Google Drive</a>. Compare the SHA-256 checksums above if you want to be sure.</p>
+          </article>
+          <article class="card">
+            <h3>Build it yourself</h3>
+            <p>Zuko is MIT licensed. Get the source and the build steps on <a href="https://github.com/AuvroIslam/Zuko">GitHub</a>.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-tight" style="padding-top:0">
+      <div class="wrap">
+        <div class="cta">
+          <img src="/assets/img/zuko-happy.webp" alt="" width="494" height="533" loading="lazy">
+          <div>
+            <h2>Installed? Try it in five minutes.</h2>
+            <p>The quick start walks you through switching protection on and testing it with safe fake data.</p>
+          </div>
+          <div class="cta-actions">
+            <a class="btn btn-primary" href="/docs">Open the quick start</a>
+            <a class="btn btn-ghost" href="/#demo">Watch the demo</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div>
+          <a class="brand" href="/"><img src="/assets/img/favicon.png" alt="" width="38" height="38">Zuko</a>
+          <p>A privacy firewall and guardian for AI agents. Your private life stays private.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul><li><a href="/download">Download</a></li><li><a href="/docs">Quick start</a></li><li><a href="/#demo">Demo video</a></li></ul>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <ul><li><a href="https://github.com/AuvroIslam/Zuko">Source code</a></li><li><a href="https://github.com/AuvroIslam/Zuko/blob/main/LICENSE">MIT License</a></li><li><a href="https://github.com/AuvroIslam/Zuko/issues">Report an issue</a></li></ul>
+        </div>
+      </div>
+      <p class="footer-note">&copy; <span data-year>2026</span> Zuko contributors. Zuko's character is an unofficial fan tribute to Prince Zuko from Avatar: The Last Airbender. The app is not affiliated with or endorsed by Viacom International or Nickelodeon.</p>
+    </div>
+  </footer>
+  <script src="/assets/site.js" defer></script>
+</body>
+</html>
