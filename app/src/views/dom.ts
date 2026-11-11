@@ -1,0 +1,101 @@
+// Minimal DOM helpers — no framework, as specified.
+
+type Attrs = Record<string, string | number | boolean | EventListener | undefined>;
+type Child = Node | string | null | undefined | false;
+
+export function h<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  attrs: Attrs = {},
+  ...children: Child[]
+): HTMLElementTagNameMap[K] {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = String(v);
+    else if (k === "text") el.textContent = String(v);
+    else if (k === "html") el.innerHTML = String(v);
+    else if (k.startsWith("on") && typeof v === "function") {
+      el.addEventListener(k.slice(2).toLowerCase(), v as EventListener);
+    } else if (k === "style") el.setAttribute("style", String(v));
+    else el.setAttribute(k, v === true ? "" : String(v));
+  }
+  for (const c of children) {
+    if (c == null || c === false) continue;
+    el.append(typeof c === "string" ? document.createTextNode(c) : c);
+  }
+  return el;
+}
+
+/** `text` with every {{PLACEHOLDER}} in a `.ph` span, for masked text the user reads. */
+export function withPlaceholders(text: string): DocumentFragment {
+  const out = document.createDocumentFragment();
+  let at = 0;
+  for (const m of text.matchAll(/\{\{[A-Z0-9_]+\}\}/g)) {
+    const i = m.index ?? 0;
+    if (i > at) out.append(text.slice(at, i));
+    out.append(h("span", { class: "ph", text: m[0] }));
+    at = i + m[0].length;
+  }
+  out.append(text.slice(at));
+  return out;
+}
+
+export function svg(path: string, size = 14, opts: { fill?: string; stroke?: number } = {}): SVGSVGElement {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  el.setAttribute("viewBox", "0 0 24 24");
+  el.setAttribute("width", String(size));
+  el.setAttribute("height", String(size));
+  el.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", path);
+  if (opts.stroke) {
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", "currentColor");
+    p.setAttribute("stroke-width", String(opts.stroke));
+    p.setAttribute("stroke-linecap", "round");
+    p.setAttribute("stroke-linejoin", "round");
+  } else {
+    p.setAttribute("fill", opts.fill ?? "currentColor");
+  }
+  el.append(p);
+  return el;
+}
+
+export function clear(el: Element) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+/**
+ * Puts text on the clipboard. The async API needs a focused document, which the
+ * island (a no-activate window) usually isn't, so fall back to the old
+ * selection-based copy, which only needs the click that got us here.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+    document.body.append(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    area.remove();
+    return ok;
+  }
+}
+
+/** Card dot used in every "who" row. */
+export function dot(color: string, size = 7): HTMLElement {
+  return h("i", {
+    class: "dot",
+    style: `width:${size}px;height:${size}px;background:${color}`,
+  });
+}
