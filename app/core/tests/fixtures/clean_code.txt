@@ -1,0 +1,170 @@
+{
+  "name": "@acme/web",
+  "version": "2.14.0-beta.3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "tsc -b && vite build",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.51.1",
+    "react": "^18.3.1",
+    "zod": "3.23.8"
+  }
+}
+
+"node_modules/zod": {
+  "version": "3.23.8",
+  "resolved": "https://registry.npmjs.org/zod/-/zod-3.23.8.tgz",
+  "integrity": "sha512-XBx9AXhXktjUqnepgTiE5flcKIYWi/rme0Eaj+5Y0lftuGBq+jyRu/md4WnuxqgP1ubdpNCsYEYPxrzVHD8d6g==",
+  "license": "MIT",
+  "funding": { "url": "https://github.com/sponsors/colinhacks" }
+}
+
+[[package]]
+name = "aho-corasick"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e60d3430d3a69478ad0993f19238d2df97c507009a52b3c10addcd7f6bcb916"
+dependencies = [
+ "memchr",
+]
+
+lodash@^4.17.21:
+  version "4.17.21"
+  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz#679591c564c3bffaae8454cf0b3df370c3d6911c"
+  integrity sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==
+
+use std::collections::HashMap;
+use std::env;
+
+/// Loads the API configuration from the environment.
+pub fn load_config() -> Result<Config, ConfigError> {
+    let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| ConfigError::Missing("ANTHROPIC_API_KEY"))?;
+    let base_url = env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".to_string());
+    let timeout_ms: u64 = env::var("TIMEOUT_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(30_000);
+    let mut headers = HashMap::new();
+    headers.insert("x-api-key", api_key.clone());
+    headers.insert("anthropic-version", "2023-06-01".to_string());
+    Ok(Config { api_key, base_url, timeout_ms, headers, max_tokens: 4096 })
+}
+
+fn hash_password(password: &str, salt: &[u8]) -> String {
+    let digest = Sha256::digest([password.as_bytes(), salt].concat());
+    hex::encode(digest)
+}
+
+impl TokenBucket {
+    pub fn new(capacity: u32, refill_per_sec: f64) -> Self {
+        Self { capacity, tokens: capacity as f64, refill_per_sec, last: Instant::now() }
+    }
+}
+
+import os
+import requests
+from dataclasses import dataclass
+
+@dataclass
+class Settings:
+    api_key: str
+    password: str | None = None
+    secret_key: str = os.environ.get("SECRET_KEY", "")
+    max_tokens: int = 1024
+
+def get_client(settings: Settings) -> requests.Session:
+    session = requests.Session()
+    session.headers["Authorization"] = f"Bearer {settings.api_key}"
+    session.headers["User-Agent"] = "acme-cli/2.14.0"
+    return session
+
+def login(username, password):
+    token = authenticate(username=username, password=password)
+    if not token:
+        raise PermissionError("invalid credentials")
+    return token
+
+export async function fetchUser(id: string): Promise<User> {
+  const res = await fetch(`${API_BASE}/users/${id}`, {
+    headers: { Authorization: `Bearer ${await getAccessToken()}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as User;
+}
+
+const schema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8).max(128),
+  apiKey: z.string().optional(),
+});
+
+services:
+  db:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+  web:
+    build: .
+    environment:
+      DATABASE_URL: postgres://app:${POSTGRES_PASSWORD}@db:5432/app
+      REDIS_URL: redis://cache:6379/0
+    depends_on: [db]
+
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci && npm test
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+commit 3f786850e387550fdab836ed7e6dc881de23001b
+Author: Octo Cat <12345+octocat@users.noreply.github.com>
+Date:   Tue Oct 1 14:03:22 2026 +0600
+
+    Fix token refresh race (#4821)
+
+diff --git a/src/auth.ts b/src/auth.ts
+index 83db48f..bf269f4 100644
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -12,7 +12,7 @@ export function refresh(token: RefreshToken) {
+
+$ npm install
+added 1284 packages, and audited 1285 packages in 41s
+212 packages are looking for funding
+found 0 vulnerabilities
+
+$ cargo build --release
+   Compiling regex-automata v0.4.8
+   Compiling zuko-core v0.1.1 (D:\Cyber\app\core)
+    Finished `release` profile [optimized] target(s) in 38.21s
+
+# README
+Visit https://docs.acme.io/getting-started or email support@example.com.
+Set `ANTHROPIC_API_KEY` in your shell, never commit it. See RFC 7519 for JWT.
+The service listens on 127.0.0.1:8080 by default; set HOST=0.0.0.0 to expose it.
+| Name | Type | Default |
+|------|------|---------|
+| timeout | number | 30000 |
+| apiKey | string | — |
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path d="M12 2L2 7l10 5 10-5-10-5z" fill="#4f46e5"/></svg>
+
+SELECT id, email_hash, created_at FROM users WHERE created_at > '2024-01-01' LIMIT 100;
+UPDATE sessions SET expires_at = NOW() + INTERVAL '30 days' WHERE token_id = $1;
+
+[2026-10-02T09:15:42.118Z] INFO  request_id=7d9f3c2a-1b4e-4f6a-9c8d-2e5f7a1b3c4d method=POST path=/v1/messages status=200 duration_ms=812
+[2026-10-02T09:15:43.002Z] WARN  rate limit: 48/50 tokens used, retry-after=12

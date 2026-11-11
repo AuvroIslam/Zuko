@@ -1,0 +1,93 @@
+{
+  "model": "cla¦ude-sonnet-4-5-20250929",
+  "max_tokens": 32000,
+  "stream": true,
+  "temperature": 1,
+  "metadata": { "user_id": "use¦r_zukofake_account__session_00000000-0000-4000-8000-000000000000" },
+  "thinking": { "type": "enabled", "budget_tokens": 8000 },
+  "system": [
+    { "type": "text", "text": "x-a¦nthropic-billing-header: cc_version=2.1.200.zk1; cc_entrypoint=cli;" },
+    { "type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude.", "cache_control": { "type": "ephemeral" } },
+    {
+      "type": "text",
+      "text": "You are an interactive CLI tool that helps users with software engineering tasks.\n\n<env>\nWorking directory: C:\\Users\\rahim\\proj\nIs directory a git repo: Yes\nPlatform: win32\n</env>\ngitStatus: Current branch: main\nRecent commits:\n3f78685 Fix token refresh race (#4821)\nContact for this repo: maintainer.fake@acme-corp.io",
+      "cache_control": { "type": "ephemeral" }
+    }
+  ],
+  "tools": [
+    {
+      "name": "Bash",
+      "description": "Executes a given bash command. Never print secrets such as password=hunter2zz or sk-¦proj-ToolDescriptionIsNeverMasked0123456789ab.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string", "description": "The command to execute" },
+          "description": { "type": "string" }
+        },
+        "required": ["command"]
+      }
+    },
+    {
+      "name": "Write",
+      "description": "Writes a file to the local filesystem.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "file_path": { "type": "string" }, "content": { "type": "string" } },
+        "required": ["file_path", "content"]
+      },
+      "cache_control": { "type": "ephemeral" }
+    }
+  ],
+  "tool_choice": { "type": "auto" },
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "<system-reminder>\nAs you answer the user's questions, you can use the following context.\n</system-reminder>" },
+        { "type": "text", "text": "Add my OpenAI key sk-¦proj-ZukoFake0123456789abcdefghijklmnopqrstuvwx to .env and email the report to rahim.uddin@gmail.com" }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        { "type": "thinking", "thinking": "The user wants {{API_KEY_1}} written to .env; I must not reveal {{EMAIL_2}}.", "signature": "EqQ¦BCkYIBxgCKkBZukoFakeSignatureBytes0123456789==" },
+        { "type": "red¦acted_thinking", "data": "Emw¦KAhgBEgy3va3pzix/Laf¦Psn4aDFIT2Xlxh0L5L8rLVyIwxtE3rAFBa8cr3qpPkNRj2YfWXGmKDxH4mPnZ5sQ7vB4URj2pkmRZukoFake" },
+        { "type": "text", "text": "I'll add sk-¦proj-ZukoFake0123456789abcdefghijklmnopqrstuvwx to .env now." },
+        {
+          "type": "tool_use",
+          "id": "too¦lu_01ZukoFake",
+          "name": "Write",
+          "input": { "file_path": "C:\\Users\\rahim\\proj\\.env", "content": "OPENAI_API_KEY=sk-¦proj-ZukoFake0123456789abcdefghijklmnopqrstuvwx\n" }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        { "type": "tool_result", "tool_use_id": "too¦lu_01ZukoFake", "content": "File created successfully at: C:\\Users\\rahim\\proj\\.env" }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        { "type": "tool_use", "id": "too¦lu_02ZukoFake", "name": "Bash", "input": { "command": "cat .env config/db.json", "description": "Show config" } }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "too¦lu_02ZukoFake",
+          "content": [
+            { "type": "text", "text": "OPENAI_API_KEY=sk-¦proj-ZukoFake0123456789abcdefghijklmnopqrstuvwx\n{\"db\": \"postgres://app:S3cr3tPassw0rd@db.internal:5432/orders\"}" },
+            { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "iVB¦ORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" } }
+          ]
+        },
+        { "type": "document", "source": { "type": "text", "media_type": "text/plain", "data": "Customer card 4242 4242 4242 4242, phone +8801712345678" }, "title": "customer.txt" },
+        { "type": "document", "source": { "type": "base64", "media_type": "application/pdf", "data": "JVB¦ERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSL0ZpbHRlci9GbGF0ZURlY29kZT4+" } },
+        { "type": "text", "text": "Now commit it. My backup mail is rahim.uddin@gmail.com", "cache_control": { "type": "ephemeral" } }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+# Recall fixtures: each line is one case; «KIND/rule:value» marks an expected finding.
+# A newline inside a case is written as ␤. All values are fake but correctly shaped.
+# A line "@config ips" switches the remaining cases to DetectorConfig { ips: true }.
+export ANT¦HROPIC_API_KEY=«API_KEY/ant¦hropic-api-key:sk-¦ant-api03-ZukoFakeKeyusVZTl-OI9Ib5AKWkocBoqRjgs62HP9E_YYxXygD8SbGsZfSzeEIRL05x28irjkrehqFhk-sZnPY7LeX4vAA»
+{"claudeAiOauth": {"accessToken": "«API_KEY/ant¦hropic-api-key:sk-¦ant-oat01-ZukoFakeOAuthwXYHWH290SXcv_6dIC0Bos0o3a2tb6-oNUYJt1PAM0U0W4hkvSQrOTJZ_xRq3CHM2Ys»"}}
+OPENAI_API_KEY="«API_KEY/openai-api-key:sk-¦proj-ZukoFakeNkMdgmZxFO6OC2PLH6Ia-G9NKbSbTYW62_TVvcbU»"
+client = OpenAI(api_key="«API_KEY/openai-api-key:sk-¦svcacct-ZukoFake_iRE1aWSUnfnY4aGI-QiUwQ9dRU8uts7»")
+old key «API_KEY/openai-api-key:sk-¦FakedZHtdna1BeW2DbVBT3BlbkFJZukouM6K17qCxTvbZUmD» still works?
+OPE¦NROUTER_API_KEY: «API_KEY/ope¦nrouter-api-key:sk-¦or-v1-deadbeefbc097f631ffc0dbe24c80cfb6ef1228a02d0c61e7f0496dbb83f192c»
+DEE¦PSEEK_API_KEY=«API_KEY/sk-api-key:sk-¦c0ffee8cd50372f5b59731238ea1e8f4»
+groq = Groq(api_key="«API_KEY/groq-api-key:gsk¦_ZukoFakeYQt5SdRFO4jtkwmfxL1NKMLEQSKVzcBGwIpndHTXSl58»")
+XAI_API_KEY=«API_KEY/xai-api-key:xai¦-ZukoFakeXTMxkm1Xu6Ok6PeD63CYpvtzQJOQQ7S3YTHhjNnz4R294mxwQYDsizsfDcDIKeO4AQxEHL6W»
+huggingface-cli login --token «TOKEN/hug¦gingface-token:hf_¦ZukoFakeKsMqheLBNywYXZsQKzHlUoUGXG»
+REP¦LICATE_API_TOKEN=«TOKEN/rep¦licate-api-token:r8_¦ZukoFakeEh6Gmroifcpuucq2tKOZsfPNv92G1»
+pplx key is «API_KEY/per¦plexity-api-key:ppl¦x-ZukoFake7lqAu97M5S1p2WVL96eyi2pboBCGBuclcaPoDkIc»
+const firebaseConfig = { apiKey: "«API_KEY/google-api-key:AIz¦aSyZukoFakenfhdoGR8iqOlvG3qTZ6hEsvQs»", projectId: "demo" };
+"client_secret": "«SECRET/goo¦gle-oauth-secret:GOC¦SPX-ZukoFakeNW6-dc7FGNZnx138H9EU»"
+aws¦_access_key_id = «API_KEY/aws-access-key:AKI¦AZUKOFAKE3WCBNHA2»
+AWS¦_ACCESS_KEY_ID=«API_KEY/aws-access-key:ASI¦AZUKOFAKEQEZC3SUB» AWS_REGION=eu-west-1
+aws¦_secret_access_key = «SECRET/aws-secret-key:ZukoFakeo/mBn¦6CpPTQdBEzpf0TICHII7ITvPHDg»
+git clone https://«TOKEN/github-token:ghp¦_ZukoFakeX67biO8T0rwba02pjEojq7ocesqn»@github.com/acme/private-repo.git
+GITHUB_TOKEN=«TOKEN/github-token:gho¦_ZukoFake7mdD3tjOVbAy3ejOdwkWbKlPfqU9» gh pr list
+token: «TOKEN/github-token:ghs¦_ZukoFakegpzhHc2zs6y8D11Pk2VHvtxaL6hz»
+Fine-grained PAT «TOKEN/git¦hub-fine-grained-pat:git¦hub_pat_ZukoFakexSI2NN8fh0Dylk_FakexnCaq00QUe42u0yE9aHRSVVer5ihSoNtj8SJFIFvgE5FG3iF4KIWVyJ» expires soon
+export GITLAB_TOKEN="«TOKEN/gitlab-token:glp¦at-ZukoFakebZWf8MveJpTH»"
+stripe.api_key = "«API_KEY/stripe-key:sk_¦live_ZukoFakeCBXUw5igoWmcLnjP»"
+STR¦IPE_RESTRICTED=«API_KEY/stripe-key:rk_¦test_ZukoFakeII1NpVqyhepJu05r»
+STR¦IPE_WEBHOOK_SECRET=«SECRET/str¦ipe-webhook-secret:whs¦ec_ZukoFake9keEAIHBkn2wBdCoL5FJUkkJ»
+SLACK_BOT_TOKEN=«TOKEN/slack-token:xox¦b-058117117172-4270412718768-ZukoFakepG3Au8gXBSv6XS15»
+app token «TOKEN/slack-app-token:xap¦p-1-AZUKO0NBQDO-8995093051245-deadbeeffc76dd84f99251bd655dd485449e96e92a837cf980f384abbbda915b»
+curl -X POST «SECRET/webhook-url:https://hooks.slack.com/services/TID8MKLX1/BCI6B265V/Zuk¦oFakeWF686tgmiACkWaMf» -d @msg.json
+webhook: "«SECRET/webhook-url:https://discord.com/api/webhooks/140¦475013900156473/Zuk¦oFakergJ1n4MvtYGBKdiO3REeqygME4R1TwYV8rXtYi5-q9YWuhJsNIzM60lvENxE»"
+bot = telebot.TeleBot("«TOKEN/tel¦egram-bot-token:0712030230:AAZ¦ukoFakeJCzqh4J53tiZgKbRdcJv9FRh4»")
+SEN¦DGRID_API_KEY=«API_KEY/sen¦dgrid-api-key:SG.Zuk¦oFakedN0EaFFW51wjWJ.Zuk¦oFake6T_GM2jzUtCqjocTMP4qxAR9p2dUk8GmViY»
+//registry.npmjs.org/:_authToken=«TOKEN/npm-token:npm¦_ZukoFake8EhsGaHQXU6yVFRSbwT7TTrqNRBe»
+password = «TOKEN/pypi-token:pyp¦i-AgEIcHlwaS5vcmcZukoFakeR_aR1MhXT-hO7vf7wXh58ICfES78p-2DAZEnt0tlOk_a9T6ixjm16rOpZncfbF»
+X-S¦hopify-Access-Token: «TOKEN/shopify-token:shp¦at_deadbeef699ecc1bbb9fe45e66526e4b»
+doctl auth init -t «TOKEN/dig¦italocean-token:dop¦_v1_deadbeef5b8e3e027f7f394c995bf835ef7e5efe01dcb1689e3451e31f16f7cd»
+twilio api key «API_KEY/twilio-api-key:SKd¦eadbeefbc9bf52b838e69c8264d54b9»
+MAILCHIMP_KEY=«API_KEY/mai¦lchimp-api-key:dea¦dbeef3e818ae26b8e59df3dbd6540-us21»
+VAULT_TOKEN=«TOKEN/has¦hicorp-vault-token:hvs.Zuk¦oFakeU9joP_Gw5WDhoP_rxTKjXHXcdxibnFddik4qSHfjAHy5KhcpnEKT18CNvDAkMOen6F37AOlCfJpgARnuAx5Bo-b»
+databricks token «TOKEN/dat¦abricks-token:dap¦ideadbeefc1ae1cd05960b3c747355437»
+LINEAR_API_KEY=«API_KEY/linear-api-key:lin¦_api_ZukoFakef282ATnPHPgGqT8vhtziuabOhF1MQnOo»
+notion = Client(auth="«TOKEN/notion-token:ntn¦_44335685007ZukoFakePQgIkVSQxI2n4AFVh2Yqeqz2y5F»")
+postman key «API_KEY/postman-api-key:PMA¦K-deadbeefb43e04572c376596-c0ffee34f59dcd4767327c0a7cd027657b»
+JIRA_API_TOKEN=«TOKEN/atl¦assian-api-token:ATA¦TT3xFfGF0ZukoFake0UxdJL1UVKt-Nmrm26I3NJ9S4sjhu5k1zZRHY93GCEoJBdveCEp9KFOkx79kmV3ThzO2Ysjp-sT800iJNkPeMBeTTKtgyrLRm-hZcKcliRr4IBab-NVoHwovxsd8sm48sfwV8Ob4uq1fCmERxtUr6P70V7s2o7ldZLAIWrfI9Pis»
+supabase login --token «TOKEN/supabase-token:sbp¦_deadbeef77068b7adf931db6ea2cb35ff184616f»
+# created: 2024␤«PRIVATE_KEY/age-secret-key:AGE¦-SECRET-KEY-1QP2KVJWC4P05WAY25XD73M0PLQLJ2E8VKNDDGEQL9U769UQX8LZHX5PJNP»
+fb token «TOKEN/fac¦ebook-access-token:EAA¦CZukoFakeYZkpdru2lhskUfCePlrD9sNg67nknTdb0acxqKtlyCDVw5mqF1O1XNOfe0SNMc9DdTTetG0tiOq77BXp4k7M1g5HIdCjgabVpoQ6rRKZOiRo6kRrmYAQzx4cPHZXnUo4nI2iwxaBDkbOOO»
+Def¦aultEndpointsProtocol=https;AccountName=zukofake;AccountKey=«SECRET/azu¦re-storage-key:Zuk¦oFakePrzU1fmeJKziXDFP78DzznOuBREzmEo5OS3XokKMvXn2TxLsBXVCsLQ+KfS¦V2OKmfCdBPai7SrlDLw==»;EndpointSuffix=core.windows.net
+AZU¦RE_CLIENT_SECRET="«SECRET/azu¦re-ad-client-secret:Zk87Q~Zuk¦oFake4PvhAzvshio_Jdi4YdIPFql2oM»"
+Authorization: Bearer «JWT/jwt:eyJ¦hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ¦zdWIiOiJ6dWtvLWZha2UtdXNlciIsIm5hbWUiOiJGYWtlIFVzZXIiLCJpYXQiOjE3MDAwMDAwMDB9.Zuk¦oFakeSigPTFELxTTFqJ6exOcXJ11qomxALFCGtba»
+session cookie=«JWT/jwt:eyJ¦hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ¦zdWIiOiJ6dWtvLWZha2UtdXNlciIsIm5hbWUiOiJGYWtlIFVzZXIiLCJpYXQiOjE3MDAwMDAwMDB9.Zuk¦oFakeSigPTFELxTTFqJ6exOcXJ11qomxALFCGtba»; Path=/
+Here is my key:␤«PRIVATE_KEY/private-key:-----BEGIN RSA PRIVATE KEY-----␤Zuk¦oFakeKeyMaterial6/y4u¦r4j0M3xj2BDYstEGdZFCXujptyCYOpQYqRLcelkr␤Zuk¦oFakeKeyMaterialOBU88IkQo/wcr¦5HO5sGaGAA54UKyxx09APTpKOstiGe3Q␤Zuk¦oFakeKeyMaterialoPfYQiM4+kSqEBbudL+E/5WD¦CkqoPYI2OfIivRJ/lemzQ␤Zuk¦oFakeKeyMaterialQ+xGN¦bxngkunPi6trJT8iAzcuSftFuXGe6nAGNiuAKMEJ␤Zuk¦oFakeKeyMaterialz9wBdi+pkY¦OpCGPfhvoxXx1WZhlyowLwoHwho1fX/f2G7␤-----END RSA PRIVATE KEY-----»␤please add it to deploy
+{"type": "service_account", "private_key": "«PRIVATE_KEY/private-key:-----BEGIN RSA PRIVATE KEY-----\nZu¦koFakeKeyMaterial6/y4u¦r4j0M3xj2BDYstEGdZFCXujptyCYOpQYqRLcelkr\nZu¦koFakeKeyMaterialOBU88IkQo/wcr¦5HO5sGaGAA54UKyxx09APTpKOstiGe3Q\nZu¦koFakeKeyMaterialoPfYQiM4+kSqEBbudL+E/5WD¦CkqoPYI2OfIivRJ/lemzQ\nZu¦koFakeKeyMaterialQ+xGN¦bxngkunPi6trJT8iAzcuSftFuXGe6nAGNiuAKMEJ\nZu¦koFakeKeyMaterialz9wBdi+pkY¦OpCGPfhvoxXx1WZhlyowLwoHwho1fX/f2G7\n-----END RSA PRIVATE KEY-----»", "client_email": "«EMAIL/email:bot@zuko-fake.iam.gserviceaccount.com»"}
+pasted only the top: «PRIVATE_KEY/pri¦vate-key-truncated:-----BEGIN RSA PRIVATE KEY-----␤Zuk¦oFakeKeyMaterial6/y4u¦r4j0M3xj2BDYstEGdZFCXujptyCYOpQYqRLcelkr␤Zuk¦oFakeKeyMaterialOBU88IkQo/wcr¦5HO5sGaGAA54UKyxx09APTpKOstiGe3Q␤Zuk¦oFakeKeyMaterialoPfYQiM4+kSqEBbudL+E/5WD¦CkqoPYI2OfIivRJ/lemzQ␤Zuk¦oFakeKeyMaterialQ+xGN¦bxngkunPi6trJT8iAzcuSftFuXGe6nAGNiuAKMEJ␤Zuk¦oFakeKeyMaterialz9wBdi+pkY¦OpCGPfhvoxXx1WZhlyowLwoHwho1fX/f2G7»
+DATABASE_URL=«CONN_STRING/con¦nection-string:postgres://app:S3cr3tPassw0rd@db.internal:5432/orders»
+mongo "«CONN_STRING/con¦nection-string:mongodb+srv://admin:Zuk0Fake!pw@cluster0.ab1cd.mongodb.net/prod?retryWrites=true»"
+REDIS_URL=«CONN_STRING/con¦nection-string:redis://:Fake9redis9pw@cache.internal:6379/0»
+Connect to «CONN_STRING/con¦nection-string:postgres://admin:hunter2zz@localhost:5432/dev».
+git remote add origin https://deploy:«PASSWORD/url-password:Sup3rS3cretZk»@ci.acme.io/repo.git
+-H "Authorization: Basic «TOKEN/aut¦horization-header:enV¦rby1mYWtlLXVzZXI6RmFrZS1QYXNzdzByZCE=»"
+curl -H "x-api-key: «API_KEY/api-key-header:Zuk¦oFakechfifUHsdImEZb66HGCU7C1Z»" https://api.acme.io
+curl -u admin:«PASSWORD/cur¦l-user-password:Zuk0-Pa55word» https://jenkins.acme.io/api/json
+mysql -h db -u root -p«PASSWORD/mys¦ql-password-flag:ZukoFake99» orders
+use bearer «TOKEN/bearer-token:Zuk¦oFake4vtPBsV6poqsgf1UQnijic1hEllz40xK» for the staging API
+mytool deploy --password «PASSWORD/cli-secret-flag:Hunter2!x» --region eu
+password = "«PASSWORD/generic-secret:hunter2!»"
+DB_PASSWORD=«PASSWORD/generic-secret:letmein99»
+DB_PASSWORD=«PASSWORD/generic-secret:correcthorse»
+database:␤  user: app␤  password: «PASSWORD/generic-secret:Pa55w0rd!»
+SECRET_KEY = '«SECRET/generic-secret:dja¦ngo-insecure-9xk2#q7m!fake0zuko»'
+api_key: «SECRET/generic-secret:dea¦dbeef6a57d913069b2c266e74ad4d»
+HEROKU_API_KEY=«SECRET/generic-secret:012¦34567-89ab-cdef-0123-456789abcdef»
+client_secret: "«SECRET/generic-secret:Zk8#pQ2$vL9!mN4@»"
+auth_token=«SECRET/generic-secret:abc¦123def456ghi789»
+const cfg = "{\"password\": \"«PASSWORD/generic-secret:s3cr3t!pw»\"}";
+PGPASSWORD=«PASSWORD/generic-secret:Xy7#kq1z» psql -h db -U app
+আমার কী «API_KEY/openai-api-key:sk-¦proj-ZukoFakeNkMdgmZxFO6OC2PLH6Ia-G9NKbSbTYW62_TVvcbU» দিয়ে চালাও
+Contact: «EMAIL/email:rahim.uddin@gmail.com»
+cc «EMAIL/email:j.doe+billing@acme-corp.io» and «EMAIL/email:ops@acme-corp.io»
+ইমেইল: «EMAIL/email:someone@cse.univ.ac.bd»
+<a href="mailto:«EMAIL/email:Karim.Fake@Outlook.com»">mail</a>
+Call me at «PHONE/phone-bd:+8801712345678» tomorrow
+মোবাইল: «PHONE/phone-bd:01812-345678»
+phone «PHONE/phone-bd:+880 1912 345678», alt «PHONE/phone-bd:01512345678»
+BD: «PHONE/phone-bd:8801612345678».
+UK office «PHONE/phone-intl:+44 20 7946 0958»
+US: «PHONE/phone-intl:+1 (415) 555-0132»
+whatsapp «PHONE/phone-intl:+919876543210»
+Berlin «PHONE/phone-intl:+49 30 901820»
+Phone: «PHONE/phone-national:(415) 555-0132»
+card «CARD/credit-card:4242 4242 4242 4242» exp 12/30
+mc «CARD/credit-card:555¦5555555554444»
+amex «CARD/credit-card:3782 822463 10005»
+discover «CARD/credit-card:601¦1-1111-1111-1117»
+cards: «CARD/credit-card:411¦1111111111111» «CARD/credit-card:555¦5555555554444»
+jcb «CARD/credit-card:353¦0111333300000»;
+IBAN: «IBAN/iban:GB82 WEST 1234 5698 7654 32»
+pay to «IBAN/iban:DE8¦9370400440532013000» by Friday
+«IBAN/iban:FR14 2004 1010 0505 0001 3M02 606» (Paris)
+SSN: «NID/us-ssn:123-45-6789»
+my social security number is «NID/us-ssn:078-05-1121»
+NID: «NID/national-id:1990123456789»
+জাতীয় পরিচয়পত্র নং «NID/national-id:199¦01234567890123»
+Passport No: «NID/passport:BK0123456»
+DOB: «DOB/date-of-birth:15/03/1990»
+Date of birth: «DOB/date-of-birth:1990-03-15», Dhaka
+@config ips
+server «IP/ipv4:52.95.110.1» is down
+ssh root@«IP/ipv4:151.101.1.69»
+dns «IP/ipv6:2606:4700:4700::1111»
