@@ -40,7 +40,8 @@ Everything runs on your machine. There is no account, no server and no telemetry
 
 ## Download
 
-**[Download Zuko 0.1.1 from the website](https://zuko-lovat.vercel.app/download)**, or from the
+**[Download Zuko 0.1.1 from the website](https://zuko-lovat.vercel.app/download)**, from
+[GitHub Releases](https://github.com/AuvroIslam/Zuko/releases/latest), or from the
 [Google Drive mirror](https://drive.google.com/drive/folders/1sVIKkMBARmzDe3M-mxnzeI2wGeL7d8JA?usp=drive_link).
 The website also has a [quick start guide](https://zuko-lovat.vercel.app/docs).
 
@@ -291,3 +292,9 @@ mascot notice and third-party credits. The secret rules are derived from
 Zuko's character is an unofficial fan tribute to Prince Zuko from *Avatar: The Last
 Airbender*. The app is not affiliated with or endorsed by Viacom International or
 Nickelodeon.
+
+---
+
+<p align="center">
+  <img src="docs/images/thank-you.png" alt="Thank you from Zuko: your private life stays private" width="100%">
+</p>
